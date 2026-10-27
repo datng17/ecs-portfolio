@@ -20,7 +20,8 @@ Output:
 
 Note: the first attempt reported exit code 137. The container was killed when the calling shell timed out
 before the ~10 minute scan finished (see docs/TROUBLESHOOTING.md T-005). The re-run above completed.
-gitleaks reports 228 rather than 233 commits because it skips merge commits with no diff of their own.
+gitleaks reports 228 of 233 commits. It only counts commits that produce a text patch, so the 1 merge commit
+and commits that touch only binary files (template images) are not counted.
 
 ## 2) Working tree incl. untracked files
 Command: gitleaks dir /repo --redact
