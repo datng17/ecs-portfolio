@@ -1,0 +1,22 @@
+* text=auto
+
+# Files executed or parsed inside Linux containers / CI must keep LF.
+*.sh        text eol=lf
+*.conf      text eol=lf
+Dockerfile  text eol=lf
+*.tf        text eol=lf
+*.tftest.hcl text eol=lf
+*.hcl       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.js        text eol=lf
+*.patch     text eol=lf
+
+# Windows scripts
+*.ps1       text eol=crlf
+
+# Binary
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.zip  binary

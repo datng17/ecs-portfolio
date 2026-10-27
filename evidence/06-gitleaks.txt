@@ -1,0 +1,33 @@
+# Test 6 - Secret scan (gitleaks)
+# Date: 2026-10-28
+# Image: zricethezav/gitleaks:latest
+# gitleaks version: v8.30.1
+# Result: PASS (0 leaks in full history, 0 leaks in working tree)
+
+## 1) Full git history
+Command (repo mounted read-only, cloned inside the container so the scan sees committed objects only):
+  docker run --rm --name gitleaks-hist -v "<repo>:/src:ro" -v "<repo>/evidence/raw:/out" \
+    --entrypoint sh zricethezav/gitleaks:latest -c \
+    "git config --global --add safe.directory '*'; git clone -q --no-local /src /tmp/r; cd /tmp/r; \
+     gitleaks git /tmp/r --redact --no-banner -v --report-format json --report-path /out/gitleaks-history.json"
+Scope: branch main (233 commits, including the local commit 4153b29). Raw log: evidence/raw/ (gitignored).
+
+Output:
+  INF 228 commits scanned.
+  INF scanned ~71348692 bytes (71.35 MB) in 9m34s
+  INF no leaks found
+  gitleaks_exit=0
+
+Note: the first attempt reported exit code 137. The container was killed when the calling shell timed out
+before the ~10 minute scan finished (see docs/TROUBLESHOOTING.md T-005). The re-run above completed.
+gitleaks reports 228 rather than 233 commits because it skips merge commits with no diff of their own.
+
+## 2) Working tree incl. untracked files
+Command: gitleaks dir /repo --redact
+Output:
+  INF scanned ~3909449 bytes (3.91 MB) in 13.9s
+  INF no leaks found
+  exit code: 0
+
+## Triage
+No findings, so nothing to triage.
