@@ -6,7 +6,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 
 - [x] Task 0: Spec files, preflight and MCP setup
 - [x] Task 1: Repo hygiene (origin → datng17/ecs-portfolio, branch main, gitleaks 0 leaks, committed locally, not pushed)
-- [ ] Task 2: Unit tests and lint
+- [x] Task 2: Unit tests and lint (10/10 tests pass, lint 0 warnings, evidence in `evidence/01-unit-test.txt`)
 - [ ] Task 3: Container (ARM64)
 - [ ] Task 4: Terraform bootstrap (state) 🛑 apply
 - [ ] Task 5: Network module + dev env wiring
@@ -52,6 +52,17 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | Other create actions (ap-southeast-2) | All required actions allowed (`simulate-principal-policy`) |
 | Cost allocation tags | Denied: "linked account" (T-003) |
 | Cost Explorer `GetCostAndUsage` | Works |
+
+## Unit tests and lint (Task 2)
+
+| Item | Result |
+|---|---|
+| `npm run lint` | `eslint src --ext .ts,.tsx --max-warnings=0`, exit 0 |
+| `npm run test:ci` | `react-scripts test --coverage --watchAll=false`, 10/10 pass, exit 0 |
+| Tests (`src/App.test.tsx`) | owner name and role, 4 section headings, 4 nav buttons scroll to the right `#id`, dark/light theme toggle |
+| Mocks (`src/setupTests.ts`) | `IntersectionObserver`, `matchMedia`, `window.scrollTo`, `Element.scrollIntoView` (jsdom lacks them) |
+| Coverage | 65.97% statements, 54.54% branches. `App.tsx` 100%. No threshold enforced yet |
+| Known noise | One `ReactDOMTestUtils.act` deprecation warning (React 18.3 with `@testing-library/react` 13). CRA's babel-preset warning about `@babel/plugin-proposal-private-property-in-object`. Neither fails the run |
 
 ## Skills note
 

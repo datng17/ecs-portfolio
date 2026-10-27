@@ -1,0 +1,82 @@
+# Task 2 unit tests
+# Command: npm run test:ci (CI=true)
+# Date: 2026-10-28T02:41:06.0184521+07:00
+# Commit: 22e4baf (+ uncommitted Task 2 changes)
+
+> react-portfolio-template@0.1.0 test:ci
+> react-scripts test --coverage --watchAll=false
+
+  console.error
+    Warning: `ReactDOMTestUtils.act` is deprecated in favor of `React.act`. Import `act` from `react` instead of `react-dom/test-utils`. See https://react.dev/warnings/react-dom-test-utils for more info.
+
+      12 | describe('App', () => {
+      13 |   test('renders the owner name and role', () => {
+    > 14 |     render(<App />);
+         |           ^
+      15 |     expect(screen.getByRole('heading', { level: 1, name: 'Dat Nguyen' })).toBeInTheDocument();
+      16 |     expect(screen.getByText('DevOps')).toBeInTheDocument();
+      17 |   });
+
+      at printWarning (node_modules/react-dom/cjs/react-dom-test-utils.development.js:71:30)
+      at error (node_modules/react-dom/cjs/react-dom-test-utils.development.js:45:7)
+      at actWithWarning (node_modules/react-dom/cjs/react-dom-test-utils.development.js:1736:7)
+      at node_modules/@testing-library/react/dist/act-compat.js:63:25
+      at renderRoot (node_modules/@testing-library/react/dist/pure.js:159:26)
+      at render (node_modules/@testing-library/react/dist/pure.js:246:10)
+      at Object.<anonymous> (src/App.test.tsx:14:11)
+      at TestScheduler.scheduleTests (node_modules/@jest/core/build/TestScheduler.js:333:13)
+      at runJest (node_modules/@jest/core/build/runJest.js:404:19)
+      at _run10000 (node_modules/@jest/core/build/cli/index.js:320:7)
+      at runCLI (node_modules/@jest/core/build/cli/index.js:173:3)
+
+PASS src/App.test.tsx (9.997 s)
+  App
+    √ renders the owner name and role (1242 ms)
+    √ renders the Expertise section heading (1179 ms)
+    √ renders the Career History section heading (405 ms)
+    √ renders the Personal Projects section heading (381 ms)
+    √ renders the Contact Me section heading (304 ms)
+    √ Expertise nav button scrolls to #expertise (466 ms)
+    √ History nav button scrolls to #history (362 ms)
+    √ Projects nav button scrolls to #projects (251 ms)
+    √ Contact nav button scrolls to #contact (263 ms)
+    √ theme toggle switches between dark and light mode (182 ms)
+
+One of your dependencies, babel-preset-react-app, is importing the
+"@babel/plugin-proposal-private-property-in-object" package without
+declaring it in its dependencies. This is currently working because
+"@babel/plugin-proposal-private-property-in-object" is already in your
+node_modules folder for unrelated reasons, but it may break at any time.
+
+babel-preset-react-app is part of the create-react-app project, which
+is not maintianed anymore. It is thus unlikely that this bug will
+ever be fixed. Add "@babel/plugin-proposal-private-property-in-object" to
+your devDependencies to work around this error. This will make this message
+go away.
+  
+---------------------|---------|----------|---------|---------|-------------------
+File                 | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+---------------------|---------|----------|---------|---------|-------------------
+All files            |   65.97 |    54.54 |   63.88 |   67.39 |                   
+ src                 |    42.1 |       50 |      60 |    42.1 |                   
+  App.tsx            |     100 |      100 |     100 |     100 |                   
+  index.tsx          |       0 |      100 |     100 |       0 | 7-19              
+  reportWebVitals.ts |       0 |        0 |       0 |       0 | 3-10              
+ src/components      |   71.79 |    55.55 |   64.51 |   73.97 |                   
+  Contact.tsx        |   56.25 |       50 |      20 |   56.25 | 22-26,73-101      
+  Expertise.tsx      |     100 |      100 |     100 |     100 |                   
+  FadeIn.tsx         |   69.56 |    59.09 |   57.14 |      75 | 31,36-39,45       
+  Footer.tsx         |     100 |      100 |     100 |     100 |                   
+  Main.tsx           |     100 |      100 |     100 |     100 |                   
+  Navigation.tsx     |      75 |       50 |   69.23 |   76.66 | 30,35-38,56,67    
+  Project.tsx        |     100 |      100 |     100 |     100 |                   
+  Timeline.tsx       |     100 |      100 |     100 |     100 |                   
+  index.js           |       0 |        0 |       0 |       0 |                   
+---------------------|---------|----------|---------|---------|-------------------
+Test Suites: 1 passed, 1 total
+Tests:       10 passed, 10 total
+Snapshots:   0 total
+Time:        11.611 s
+Ran all test suites.
+
+# Exit code: 0
