@@ -8,7 +8,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 1: Repo hygiene (origin → datng17/ecs-portfolio, branch main, gitleaks 0 leaks, committed locally, not pushed)
 - [x] Task 2: Unit tests and lint (10/10 tests pass, lint 0 warnings, evidence in `evidence/01-unit-test.txt`)
 - [x] Task 3: Container (ARM64) (hadolint 0, Trivy 0 vulns / 0 misconfig, 27.9 MB compressed, smoke 21/21, committed locally)
-- [ ] Task 4: Terraform bootstrap (state) 🛑 apply
+- [x] Task 4: Terraform bootstrap (state) (applied 2026-10-28, 7 resources, tflint 0, checkov 27/0/3 skipped, no drift)
 - [ ] Task 5: Network module + dev env wiring
 - [ ] Task 6: ECR + IAM modules (blocked by B-1 for the OIDC provider)
 - [ ] Task 7: ALB module
@@ -82,6 +82,25 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | Smoke, host | `smoke.ps1` (curl.exe) → `http://localhost:8080`: 21/21 PASS, exit 0. Earlier 3 failures were AdGuard injection (T-006) |
 | Raw output | `evidence/raw/smoke-local-*.txt`, `evidence/raw/trivy-*` (gitignored). `evidence/07-smoke.txt` is left for Task 10 |
 | Known noise | `nginx -t` via `docker exec` under QEMU logs `io_setup() failed (38: Function not implemented)`. QEMU user-mode lacks Linux AIO; the test still succeeds and native Graviton isn't affected |
+
+## Terraform bootstrap (Task 4)
+
+| Item | Result |
+|---|---|
+| Stack | `infra/bootstrap`, local state (gitignored). Terraform 1.16.3, AWS provider 6.70.0. Lock file has windows/linux (amd64, arm64)/darwin_arm64 hashes |
+| Bucket | `tfstate-681990781993-apse2` in ap-southeast-2. `allowed_account_ids` pins the account |
+| Settings | Versioning Enabled. SSE-KMS with AWS-managed `aws/s3` key + Bucket Key (no CMK cost). All 4 public-access-block flags on. `BucketOwnerEnforced`. `prevent_destroy` |
+| Bucket policy | Deny `aws:SecureTransport=false`, deny `s3:TlsVersion < 1.2`. Policy status `IsPublic=false` |
+| Lifecycle | Non-current versions expire after 90 days (newest 10 kept). Abort incomplete multipart uploads after 7 days. Remove expired delete markers (left by `.tflock` objects) |
+| Env backends | `infra/envs/{dev,prod}/backend.tf`: S3, key `envs/<env>/terraform.tfstate`, `encrypt = true`, `use_lockfile = true`. `terraform init` in dev succeeds |
+| fmt / validate | exit 0 / valid |
+| tflint | 0.65.0 + AWS ruleset 0.50.0 (`infra/.tflint.hcl`), 0 findings, exit 0 |
+| checkov | 3.3.30, 27 passed, 0 failed, 3 skipped with in-code reasons (CKV_AWS_18 access logging, CKV_AWS_144 cross-region replication, CKV2_AWS_62 event notifications), exit 0 |
+| Apply | 7 added, 0 changed, 0 destroyed. Follow-up plan: no changes |
+| Demo (CLI) | `get-bucket-versioning` Enabled, `get-bucket-encryption` aws:kms + BucketKeyEnabled, `get-public-access-block` all true, ownership BucketOwnerEnforced |
+| TLS-only test | `list-objects-v2` over `http://s3.ap-southeast-2.amazonaws.com` → AccessDenied, "explicit deny in a resource-based policy" |
+| Raw output | `evidence/raw/{tflint,checkov}-bootstrap.txt`, `bootstrap-apply.txt`, `bootstrap-verify.txt` (gitignored) |
+| Teardown note | Removing the bucket (Task 18) needs `prevent_destroy` removed and the bucket emptied of all versions first |
 
 ## Skills note
 

@@ -86,3 +86,9 @@ Each entry: **Symptom → Root cause → Fix → Prevention**.
 - **Prevention:** run `docker version` before long Docker steps. If the server section is missing,
   restart Docker Desktop (or `wsl --shutdown`) rather than killing processes. Avoid bind-mounting Windows
   paths for one-off scripts.
+- **Recurrence (Task 4):** the engine returned 500 again at the start of a session, with no bind mount
+  involved, so the bind mount wasn't the trigger. `docker desktop restart` brought it back immediately
+  (server 29.9.1). Scanner sources are still streamed in with
+  `cmd /c "tar -c -C infra . | docker run --rm -i ... sh -c ""mkdir -p /w && tar -x -C /w && ..."""`.
+  When building `sh -c` strings inside a pwsh command, escape `$?` as `` `$? ``, otherwise pwsh expands it
+  first and prints `True`/`False` instead of the container's exit code.
