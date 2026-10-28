@@ -52,3 +52,38 @@ output "github_deploy_role_arns" {
   description = "Role ARNs for the CD deploy jobs, by GitHub environment."
   value       = module.iam.github_deploy_role_arns
 }
+
+output "alb_dns_name" {
+  description = "ALB DNS name: target of the proxied Cloudflare CNAME."
+  value       = module.alb.alb_dns_name
+}
+
+output "alb_security_group_id" {
+  description = "ALB security group (Cloudflare IPv4 only)."
+  value       = module.alb.security_group_id
+}
+
+output "alb_target_group_arn" {
+  description = "Target group for the ECS service."
+  value       = module.alb.target_group_arn
+}
+
+output "alb_certificate_arn" {
+  description = "ACM certificate on the HTTPS listener."
+  value       = module.alb.certificate_arn
+}
+
+output "origin_verify_header_name" {
+  description = "Header the Cloudflare Transform Rule must add."
+  value       = module.alb.origin_verify_header_name
+}
+
+output "origin_secret_parameter_name" {
+  description = "SSM SecureString with the header value (aws ssm get-parameter --with-decryption)."
+  value       = module.alb.origin_secret_parameter_name
+}
+
+output "alb_access_logs_bucket" {
+  description = "S3 bucket with ALB access logs."
+  value       = module.alb.access_logs_bucket
+}

@@ -34,3 +34,19 @@ module "iam" {
   github_repository          = var.github_repository
   github_deploy_environments = ["dev", "prod"]
 }
+
+module "alb" {
+  source = "../../modules/alb"
+
+  name_prefix       = local.name_prefix
+  vpc_id            = module.network.vpc_id
+  vpc_cidr          = module.network.vpc_cidr
+  public_subnet_ids = module.network.public_subnet_ids
+
+  certificate_domain    = var.certificate_domain
+  origin_secret_version = var.origin_secret_version
+
+  enable_deletion_protection = var.alb_deletion_protection
+  access_logs_retention_days = var.log_retention_days
+  access_logs_force_destroy  = var.alb_logs_force_destroy
+}

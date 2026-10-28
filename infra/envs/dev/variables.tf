@@ -77,3 +77,27 @@ variable "github_repository" {
   type        = string
   default     = "datng17/ecs-portfolio"
 }
+
+variable "certificate_domain" {
+  description = "Domain of the existing ACM certificate (ap-southeast-2) used by the HTTPS listener."
+  type        = string
+  default     = "test.name.vn"
+}
+
+variable "origin_secret_version" {
+  description = "Bump to rotate the X-Origin-Verify secret. Update the Cloudflare Transform Rule right after apply."
+  type        = string
+  default     = "1"
+}
+
+variable "alb_deletion_protection" {
+  description = "ALB deletion protection. false in dev (teardown), true in prod."
+  type        = bool
+  default     = false
+}
+
+variable "alb_logs_force_destroy" {
+  description = "Let terraform destroy remove the ALB access log bucket with objects in it. true in dev, false in prod."
+  type        = bool
+  default     = true
+}

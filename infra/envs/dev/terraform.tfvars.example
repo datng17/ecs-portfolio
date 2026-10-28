@@ -18,6 +18,12 @@ log_retention_days = 14
 # ECR
 ecr_force_delete = true # dev only: destroy removes the repo even with images; prod keeps false.
 
+# ALB
+certificate_domain      = "test.name.vn" # Existing ACM cert in ap-southeast-2; the listener requires ISSUED.
+origin_secret_version   = "1"            # Bump to rotate X-Origin-Verify, then update the Cloudflare Transform Rule.
+alb_deletion_protection = false          # dev only; prod keeps true.
+alb_logs_force_destroy  = true           # dev only; prod keeps false.
+
 # GitHub Actions OIDC (B-1): the SCP blocks creating/reading the provider, so the org admin creates it.
 # The gha-* roles can be planned and applied, but can't be assumed until this provider exists.
 github_oidc_provider_arn = "arn:aws:iam::681990781993:oidc-provider/token.actions.githubusercontent.com"

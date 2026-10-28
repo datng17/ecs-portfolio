@@ -11,7 +11,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 4: Terraform bootstrap (state) (applied 2026-10-28, 7 resources, tflint 0, checkov 27/0/3 skipped, no drift)
 - [x] Task 5: Network module + dev env wiring (plan 26 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov module 62 passed / 0 failed / 5 skipped with inline justification, not applied)
 - [x] Task 6: ECR + IAM modules (plan 38 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov ecr 3/0/0, iam 61/0/3, dev 164/0/8, not applied; OIDC provider ARN is a variable per B-1)
-- [ ] Task 7: ALB module
+- [x] Task 7: ALB module (plan 84 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov alb 53/0/8, infra minus bootstrap 217/0/16, not applied)
 - [ ] Task 8: ECS module (task definition + service + autoscaling)
 - [ ] Task 9: Observability module + prod env (see B-3)
 - [ ] Task 10: First dev deploy 🛑 apply; Cloudflare steps done by the user
@@ -120,6 +120,27 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | Plan | 38 to add (26 network + 2 ECR + 10 IAM), 0 change, 0 destroy. Not applied |
 | Raw output | `evidence/raw/plan-dev-ecr-iam.txt`, `plan-dev-trust-policies.txt`, `checkov-ecr-iam.txt` (gitignored) |
 | Open risk | IAM may reject `CreateRole` if the Federated principal (the OIDC provider) doesn't exist yet. If the Task 10 apply fails on the `gha-*` roles, apply with `create_github_roles = false` until the admin creates the provider |
+
+## ALB module (Task 7)
+
+| Item | Result |
+|---|---|
+| Module | `infra/modules/alb`, wired into `infra/envs/dev` as `module.alb`. New providers `hashicorp/http` 3.6.3 and `hashicorp/random` 3.9.1; lock file has hashes for windows_amd64/386, linux_amd64/arm64, darwin_arm64 |
+| Security group | `portfolio-dev-alb-sg`. Ingress 80 and 443 from each Cloudflare IPv4 range only (15 ranges, 30 rules), fetched from `https://www.cloudflare.com/ips-v4` by the `http` data source. Preconditions: HTTP 200, list not empty, every entry is a CIDR, at most 60 rules. Egress only tcp/8080 to the VPC CIDR. No IPv6 (the ALB is IPv4-only, so Cloudflare connects over IPv4) |
+| Certificate | `aws_acm_certificate` data source by domain `test.name.vn` (all statuses looked up). HTTPS listener precondition `status == "ISSUED"`. Plan resolves to `arn:aws:acm:ap-southeast-2:681990781993:certificate/15eda235-...` (matches R1) |
+| TLS policy | `ELBSecurityPolicy-TLS13-1-2-Res-2021-06`: TLS 1.3 plus TLS 1.2 with AEAD ciphers only. Validation rejects any non-`TLS13` policy. TLS 1.3-only (`TLS13-1-3`) was not chosen so Cloudflare's origin connection works on either version |
+| Listeners | `:80` 301 redirect to `:443`. `:443` default action fixed-response **403** `Forbidden`. Rule priority 100: header `X-Origin-Verify` equals the secret → forward to the target group |
+| Origin secret | `random_password` (48 chars, alphanumeric, because ALB header matching treats `*` and `?` as wildcards) stored in SSM SecureString `/portfolio-dev/alb/origin-verify-secret` (AWS-managed `aws/ssm` key). The plan shows the rule condition as sensitive. Rotate by bumping `origin_secret_version`, then update the Cloudflare Transform Rule. The value is in Terraform state, which is SSE-KMS encrypted and private |
+| Target group | `portfolio-dev-tg`, `target_type = ip`, HTTP:8080, health check `/healthz` matcher 200, interval 15 s, 2 healthy / 3 unhealthy, deregistration delay 30 s |
+| ALB | `portfolio-dev-alb`, public subnets, `drop_invalid_header_fields = true`, desync mitigation `defensive`, HTTP/2, deletion protection from `alb_deletion_protection` (false in dev) |
+| Access logs | Bucket `portfolio-dev-alb-logs-681990781993-ap-southeast-2`, prefix `alb`. SSE-S3 (the only encryption ALB log delivery supports), BucketOwnerEnforced, public access blocked, versioning, logs expire after 14 days, TLS-only deny. Policy uses the `logdelivery.elasticloadbalancing.amazonaws.com` principal with the account ID in the path, the form AWS now recommends over the legacy Sydney ELB account `783225319266`. `force_destroy` true in dev |
+| Outputs for Task 8/9 | `security_group_id`, `target_group_arn`, `https_listener_arn` (the ECS service depends on it), `alb_arn_suffix`, `target_group_arn_suffix`, `alb_request_count_resource_label` |
+| fmt / validate | exit 0 / valid |
+| tflint | envs/dev and modules/alb: 0 findings, exit 0 |
+| checkov | alb 53 passed / 0 failed / 8 skipped, each with an inline reason: CKV2_AWS_28 (WAF: Cloudflare WAF at the edge plus the Cloudflare-only security group; AWS WAF ~$10+/month), CKV_AWS_150 (deletion protection is variable-driven), CKV_AWS_378 (HTTP to targets in private subnets; TLS ends at the ALB), CKV_AWS_337 (aws/ssm key, no CMK), CKV_AWS_145 (ALB logs support SSE-S3 only), CKV_AWS_18, CKV_AWS_144, CKV2_AWS_62. All of `infra/` except bootstrap: 217 / 0 / 16 |
+| Plan | 84 to add (38 earlier + 46 ALB), 0 change, 0 destroy. Not applied |
+| Raw output | `evidence/raw/plan-dev-alb.txt`, `checkov-alb.txt` (gitignored) |
+| Check in Task 11 | `gha-plan` refreshes the SecureString parameter. `ReadOnlyAccess` covers `ssm:GetParameter` and the `aws/ssm` key policy allows decrypt through SSM for account principals, so no extra IAM is expected; confirm on the first CI plan |
 
 ## Skills note
 

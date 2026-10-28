@@ -115,3 +115,14 @@ Each entry: **Symptom → Root cause → Fix → Prevention**.
   argument, so Terraform sees an extra positional argument.
 - **Fix:** quote flag arguments that contain `=` and `.`: `terraform plan '-input=false' '-out=dev.tfplan'`.
 - **Prevention:** always quote `-flag=value` arguments to native tools in pwsh scripts and docs.
+
+## T-010: `terraform providers lock` for five platforms timed out (Task 7)
+
+- **Symptom:** after adding the `http` and `random` providers, `terraform providers lock` with five
+  `-platform` flags ran past the 5-minute command timeout with no output.
+- **Root cause:** without provider arguments the command re-downloads every provider for every platform. The
+  AWS provider is several hundred MB per platform, and its hashes were already in the lock file.
+- **Fix:** lock only the new providers:
+  `terraform providers lock '-platform=windows_amd64' '-platform=windows_386' '-platform=linux_amd64' '-platform=linux_arm64' '-platform=darwin_arm64' hashicorp/http hashicorp/random`.
+  It finished in seconds and the lock file now has 5 `h1:` hashes per provider.
+- **Prevention:** when adding a provider, pass its address to `providers lock` instead of relocking all of them.
