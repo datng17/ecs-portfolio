@@ -7,7 +7,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 0: Spec files, preflight and MCP setup
 - [x] Task 1: Repo hygiene (origin → datng17/ecs-portfolio, branch main, gitleaks 0 leaks, committed locally, not pushed)
 - [x] Task 2: Unit tests and lint (10/10 tests pass, lint 0 warnings, evidence in `evidence/01-unit-test.txt`)
-- [ ] Task 3: Container (ARM64)
+- [x] Task 3: Container (ARM64) (hadolint 0, Trivy 0 vulns / 0 misconfig, 27.9 MB compressed, smoke 21/21, committed locally)
 - [ ] Task 4: Terraform bootstrap (state) 🛑 apply
 - [ ] Task 5: Network module + dev env wiring
 - [ ] Task 6: ECR + IAM modules (blocked by B-1 for the OIDC provider)
@@ -63,6 +63,25 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | Mocks (`src/setupTests.ts`) | `IntersectionObserver`, `matchMedia`, `window.scrollTo`, `Element.scrollIntoView` (jsdom lacks them) |
 | Coverage | 65.97% statements, 54.54% branches. `App.tsx` 100%. No threshold enforced yet |
 | Known noise | One `ReactDOMTestUtils.act` deprecation warning (React 18.3 with `@testing-library/react` 13). CRA's babel-preset warning about `@babel/plugin-proposal-private-property-in-object`. Neither fails the run |
+
+## Container (Task 3)
+
+| Item | Result |
+|---|---|
+| Build | `docker buildx build --platform linux/arm64 -t portfolio:local --load .`. Builder on `$BUILDPLATFORM` (node:24-alpine), runtime `nginxinc/nginx-unprivileged:alpine`, both pinned by digest |
+| Runtime hardening | USER 101, port 8080, exec-form HEALTHCHECK (busybox wget `/healthz`), curl removed, `apk upgrade` for Alpine fixes |
+| nginx | `/healthz`, gzip, `no-cache` HTML / `immutable` static, security headers via include, SPA fallback, dotfiles 404, `server_tokens off`, JSON access logs, real_ip (VPC + Cloudflare ranges) |
+| Compose run | healthy; `ReadonlyRootfs=true`, `User=101:101`, `CapDrop=[ALL]`, `no-new-privileges`, tmpfs `/tmp` + `/var/cache/nginx`, bound to 127.0.0.1:8080. Writes to `/etc` fail with "Read-only file system" |
+| hadolint | 2.15.1, 0 findings, exit 0 (`evidence/02-hadolint.txt`) |
+| Trivy vuln | 0.76.1, 0 vulnerabilities (all severities), HIGH/CRITICAL gate exit 0 (`evidence/03-trivy.txt`) |
+| Trivy vuln, before fix | 3 HIGH (brotli-libs, curl, libcurl), 3 MEDIUM, 44 LOW, 2 UNKNOWN, all fixable. Pinned base digest was already the latest upstream |
+| Trivy misconfig | Dockerfile, 0 findings, exit 0 |
+| Size, uncompressed | 65.9 MB (`docker image inspect`). Base alone ~60.7 MB, so < 50 MB uncompressed isn't reachable with the mandated base |
+| Size, compressed | 27.9 MB (gzip of `docker save`, approximates ECR). Base 25.0 MB, app 2.5 MB, patch layer 2.7 MB. **< 50 MB target met on this metric** |
+| Smoke, container | `smoke.sh` in `curlimages/curl` on `portfolio_default` → `http://web:8080`: 21/21 PASS, exit 0 |
+| Smoke, host | `smoke.ps1` (curl.exe) → `http://localhost:8080`: 21/21 PASS, exit 0. Earlier 3 failures were AdGuard injection (T-006) |
+| Raw output | `evidence/raw/smoke-local-*.txt`, `evidence/raw/trivy-*` (gitignored). `evidence/07-smoke.txt` is left for Task 10 |
+| Known noise | `nginx -t` via `docker exec` under QEMU logs `io_setup() failed (38: Function not implemented)`. QEMU user-mode lacks Linux AIO; the test still succeeds and native Graviton isn't affected |
 
 ## Skills note
 

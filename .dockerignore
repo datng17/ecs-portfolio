@@ -1,0 +1,17 @@
+# Allow-list: only what the Dockerfile COPYs is sent to the build context.
+*
+
+!package.json
+!package-lock.json
+!patches/
+!tsconfig.json
+!public/
+!src/
+!docker/nginx/
+
+# Never ship tests or local junk inside the allowed folders.
+src/**/*.test.ts
+src/**/*.test.tsx
+src/setupTests.ts
+**/.DS_Store
+**/Thumbs.db

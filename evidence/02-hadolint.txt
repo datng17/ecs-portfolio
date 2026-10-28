@@ -1,0 +1,12 @@
+# hadolint report
+date: 2026-10-28T12:43:33+07:00
+tool: Haskell Dockerfile Linter 2.15.1 (image hadolint/hadolint:latest)
+command: Get-Content -Raw Dockerfile | docker run --rm -i hadolint/hadolint:latest hadolint --failure-threshold style -
+
+findings:
+  (none)
+
+exit code: 0
+
+note: an intermediate revision used `USER root` before `apk del/upgrade` and got
+DL3066 (info: non-numeric user id). Changed to `USER 0`; the re-run above is clean.

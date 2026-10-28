@@ -1,0 +1,34 @@
+# Local run that mirrors the ECS task hardening:
+# arm64, UID 101, read-only root filesystem, tmpfs for the writable paths,
+# no Linux capabilities, no privilege escalation.
+#
+#   docker compose up -d --build
+#   ./scripts/smoke.ps1            (or: sh scripts/smoke.sh)
+#   docker compose down
+#
+# On an x86 host the arm64 image runs under QEMU emulation (Docker Desktop
+# ships binfmt handlers), which is fine for a static nginx site.
+name: portfolio
+
+services:
+  web:
+    image: portfolio:local
+    build:
+      context: .
+      platforms:
+        - linux/arm64
+    platform: linux/arm64
+    user: "101:101"
+    read_only: true
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=0700,size=16m
+      - /var/cache/nginx:uid=101,gid=101,mode=0700,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:8080:8080"
+    mem_limit: 512m
+    cpus: 0.5
+    restart: unless-stopped

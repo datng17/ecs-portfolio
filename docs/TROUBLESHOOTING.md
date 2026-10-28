@@ -55,3 +55,34 @@ Each entry: **Symptom → Root cause → Fix → Prevention**.
   `docker wait` for it with a long timeout. The re-run finished with `no leaks found`, exit 0.
 - **Prevention:** run long scans detached, or narrow the range with `--log-opts` in CI (for example only the
   pushed commits), and keep the full-history scan as a one-off.
+
+## T-006: Local smoke test false negatives from AdGuard HTML injection
+
+- **Symptom:** the first `scripts/smoke.ps1` run against `http://localhost:8080` reported 14/17 PASS. The
+  "no inline `<script>`", body and bundle checks failed, and the HTML contained
+  `<script src="//local.adguard.org/...">`. `curl.exe -i http://localhost:8080/` on the same host showed
+  clean HTML.
+- **Root cause:** AdGuard on the Windows host intercepts traffic from .NET `HttpClient`
+  (`Invoke-WebRequest`) and injects its own script into HTML responses. The container was serving the
+  correct content.
+- **Fix:** `smoke.ps1` now uses `curl.exe`, which AdGuard doesn't filter. The reference run uses
+  `smoke.sh` from a `curlimages/curl` container on the compose network (`http://web:8080`), so no host
+  software sits in the path. Both pass 21/21.
+- **Prevention:** run smoke tests from a container (or CI runner), never through a desktop HTTP stack. If a
+  body check fails, compare with `curl.exe -i` before blaming the image.
+
+## T-007: Docker Desktop engine returned 500 on `_ping`
+
+- **Symptom:** `docker run ...` failed with `500 Internal Server Error ... dockerDesktopLinuxEngine/_ping`
+  during the first containerised smoke run.
+- **Root cause:** the Docker Desktop Linux engine (WSL2 VM) had stopped responding. The exact trigger
+  wasn't captured. It coincided with a `-v ${PWD}/scripts:/scripts:ro` Windows-path bind mount, so that
+  pattern was dropped as a precaution.
+- **Fix:** the engine had recovered on the next session (`docker version` reported server 29.9.1). The
+  script is now streamed through stdin instead of a bind mount:
+  `cmd /c "docker run --rm -i --network portfolio_default curlimages/curl:latest sh -s -- http://web:8080 < scripts\smoke.sh"`.
+  Use `cmd /c` with `<`: piping `Get-Content` in pwsh appends CRLF, so `sh` ends with `sh: \r: not found`
+  and exit 127 even when every check passed.
+- **Prevention:** run `docker version` before long Docker steps. If the server section is missing,
+  restart Docker Desktop (or `wsl --shutdown`) rather than killing processes. Avoid bind-mounting Windows
+  paths for one-off scripts.
