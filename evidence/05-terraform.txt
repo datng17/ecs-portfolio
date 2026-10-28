@@ -1,0 +1,80 @@
+# Task 10: first dev deploy (redacted apply record)
+# Date: 2026-10-28 (Asia/Ho_Chi_Minh, +07:00). Terraform v1.16.3, AWS provider 6.70.0. Account 681990781993, ap-southeast-2.
+# Redactions: the alert email is shown as <alert_email>. The origin-verify secret (SSM SecureString
+# /portfolio-dev/alb/origin-verify-secret) isn't in this file. The apply and plan output show it only as (sensitive value).
+# Full raw output: evidence/raw/apply-dev-task10.txt (gitignored).
+
+## Command (infra/envs/dev)
+terraform apply '-input=false' '-lock-timeout=60s' -no-color dev.tfplan
+
+## Saved plan applied
+Plan: 109 to add, 0 to change, 0 to destroy  (network 26, iam 10, alb 46, ecs 14, observability 13; ECR's 2 applied earlier)
+Container image: 681990781993.dkr.ecr.ap-southeast-2.amazonaws.com/portfolio-dev-app:98e5ce1ff2c22cbde3ebb63c8a7ddcad5d16a022
+
+## Result
+Apply complete! Resources: 109 added, 0 changed, 0 destroyed.
+exit code: 0
+Slowest resources: aws_lb.this 2m38s, aws_nat_gateway.this[0] 1m48s. The ECS service reached steady state at 16:34:30.
+B-1 fallback: not needed. IAM accepted CreateRole for portfolio-gha-plan / portfolio-gha-deploy-{dev,prod}
+(the roles exist, but can't be assumed until the org admin creates the OIDC provider).
+
+## terraform output (non-sensitive)
+alarm_names = {
+  "cpu" = "portfolio-dev-ecs-cpu-high"
+  "elb_5xx" = "portfolio-dev-alb-elb-5xx"
+  "latency_p95" = "portfolio-dev-alb-latency-p95"
+  "memory" = "portfolio-dev-ecs-memory-high"
+  "target_5xx_rate" = "portfolio-dev-alb-target-5xx-rate"
+  "unhealthy_hosts" = "portfolio-dev-tg-unhealthy-hosts"
+}
+alb_access_logs_bucket = "portfolio-dev-alb-logs-681990781993-ap-southeast-2"
+alb_certificate_arn = "arn:aws:acm:ap-southeast-2:681990781993:certificate/15eda235-c960-4717-8bca-fb4aaa15e68a"
+alb_dns_name = "portfolio-dev-alb-1560386417.ap-southeast-2.elb.amazonaws.com"
+alb_security_group_id = "sg-0edeb454d03463f68"
+alb_target_group_arn = "arn:aws:elasticloadbalancing:ap-southeast-2:681990781993:targetgroup/portfolio-dev-tg/10aa8658d68e6bed"
+alerts_topic_arn = "arn:aws:sns:ap-southeast-2:681990781993:portfolio-dev-alerts"
+app_log_group_name = "/ecs/portfolio-dev"
+azs = tolist([
+  "ap-southeast-2a",
+  "ap-southeast-2b",
+])
+budget_name = "portfolio-account-monthly-cost"
+dashboard_url = "https://ap-southeast-2.console.aws.amazon.com/cloudwatch/home?region=ap-southeast-2#dashboards/dashboard/portfolio-dev"
+ecr_repository_url = "681990781993.dkr.ecr.ap-southeast-2.amazonaws.com/portfolio-dev-app"
+ecs_cluster_name = "portfolio-dev-cluster"
+ecs_container_name = "app"
+ecs_execution_role_arn = "arn:aws:iam::681990781993:role/portfolio-dev-ecs-execution"
+ecs_service_name = "portfolio-dev-app"
+ecs_task_definition_family = "portfolio-dev-app"
+ecs_task_role_arn = "arn:aws:iam::681990781993:role/portfolio-dev-ecs-task"
+flow_log_group_name = "/vpc/portfolio-dev/flow-logs"
+github_deploy_role_arns = {
+  "dev" = "arn:aws:iam::681990781993:role/portfolio-gha-deploy-dev"
+  "prod" = "arn:aws:iam::681990781993:role/portfolio-gha-deploy-prod"
+}
+github_plan_role_arn = "arn:aws:iam::681990781993:role/portfolio-gha-plan"
+nat_public_ips = [
+  "54.206.167.137",
+]
+origin_secret_parameter_name = "/portfolio-dev/alb/origin-verify-secret"
+origin_verify_header_name = "X-Origin-Verify"
+private_subnet_ids = [
+  "subnet-0f4064bc4e67177e0",
+  "subnet-06a11260638c836c5",
+]
+public_subnet_ids = [
+  "subnet-0a3511e0f93c5802d",
+  "subnet-0353caeaed77211dd",
+]
+vpc_id = "vpc-061ff7e6ddeef9825"
+
+## Drift check: terraform plan '-input=false' '-lock-timeout=60s' -no-color -detailed-exitcode
+Run 1: exit 2. Plan: 1 to add, 0 to change, 1 to destroy.
+  module.ecs.aws_ecs_task_definition.this must be replaced. The cause is a container_definitions diff that forces
+  replacement: ECS returns environment = [], systemControls = [], volumesFrom = [] and
+  linuxParameters.capabilities.add = [], which the config didn't declare. This is a known AWS provider
+  normalisation diff. AWS itself didn't change, and the volume blocks only show as known-after-apply because of the replacement.
+  Not applied (replacing the task definition would deregister revision 1, which the service runs). See T-013.
+Fix: infra/modules/ecs/main.tf now declares those four empty lists. terraform test (modules/ecs) 11 passed / 0 failed.
+Run 2: exit 0. "No changes. Your infrastructure matches the configuration."
+Raw: evidence/raw/plan-dev-postapply-task10.txt (run 1), plan-dev-postapply2-task10.txt (run 2).

@@ -147,3 +147,19 @@ Each entry: **Symptom → Root cause → Fix → Prevention**.
 - **Fix:** use double quotes for arguments that contain a variable: `terraform "-chdir=infra/$d" validate`.
 - **Prevention:** single quotes for literal `-flag=value` arguments (T-009), double quotes when the value
   contains a variable.
+
+## T-013: Plan after the first apply wanted to replace the ECS task definition (Task 10)
+
+- **Symptom:** right after `Apply complete! Resources: 109 added`, `terraform plan -detailed-exitcode` exited 2
+  with `1 to add, 0 to change, 1 to destroy`: `module.ecs.aws_ecs_task_definition.this must be replaced`. The
+  `container_definitions` diff removed `environment = []`, `systemControls = []`, `volumesFrom = []` and
+  `linuxParameters.capabilities.add = []`.
+- **Root cause:** the ECS API returns these fields as empty lists even when the request omits them. The AWS
+  provider compares the stored JSON with the config and treats the difference as a change. Any change to
+  `container_definitions` forces a new revision. Nothing changed in AWS.
+- **Fix:** declare the four empty lists in `local.container_definitions` (`infra/modules/ecs/main.tf`). The
+  next plan reported `No changes` (exit 0), and `terraform test` in `modules/ecs` still passes 11/11. The replacement
+  was never applied. It would have deregistered revision 1, which the service is running.
+- **Prevention:** run `terraform plan -detailed-exitcode` right after every first apply. When writing
+  `container_definitions`, declare the fields ECS fills with defaults (`environment`, `mountPoints`,
+  `portMappings`, `volumesFrom`, `systemControls`, `capabilities.add`) explicitly.

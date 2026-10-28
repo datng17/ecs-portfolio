@@ -183,6 +183,25 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | Raw output | `evidence/raw/plan-dev-task9.txt`, `plan-prod-task9.txt`, `tflint-task9.txt`, `checkov-infra-task9*.txt`, `checkov-observability.txt` (gitignored) |
 | Task 10 notes | Confirm the SNS email after apply, otherwise alarms reach no one (budget emails still arrive directly). Alarms on ALB/ECS metrics start in `INSUFFICIENT_DATA` and move to `OK` once traffic and tasks report |
 
+## First dev deploy (Task 10)
+
+| Item | Result |
+|---|---|
+| Image | `portfolio-dev-app:98e5ce1ff2c22cbde3ebb63c8a7ddcad5d16a022` (arm64), pushed after the ECR-only apply (2 resources). ECR basic scan 0 findings |
+| Apply | 2026-10-28, `terraform apply '-input=false' '-lock-timeout=60s' -no-color dev.tfplan`: **109 added, 0 changed, 0 destroyed**, exit 0. ALB 2m38s, NAT 1m48s. Record in `evidence/05-terraform.txt` (redacted) |
+| B-1 fallback | Not needed. IAM accepted `CreateRole` for `portfolio-gha-plan` / `portfolio-gha-deploy-{dev,prod}` without the OIDC provider. The roles still can't be assumed until the admin creates it |
+| Drift check | First plan: replace the task definition (provider normalisation of empty lists, T-013). Not applied. Fixed in `modules/ecs`, then `plan -detailed-exitcode` exit 0, `No changes`. `terraform test` 11/11 |
+| ALB | `portfolio-dev-alb-1560386417.ap-southeast-2.elb.amazonaws.com`. `:443` default fixed-response 403, rule 100 `http-header X-Origin-Verify` (1 value) → forward to `portfolio-dev-tg`. `:80` redirect 301 |
+| ECS service | `portfolio-dev-app`: desired 2, running 2, 1 PRIMARY deployment, rollout `COMPLETED`, steady state 16:34 |
+| Tasks | 2 RUNNING, HEALTHY, arm64, revision 1: one in ap-southeast-2a, one in ap-southeast-2b |
+| Target health | 2/2 healthy (10.10.135.204, 10.10.158.45, port 8080) |
+| Direct to ALB | `curl.exe` from this machine (not Cloudflare) to `https://` and `http://<alb_dns_name>/`: `000`, curl exit 28 (10 s timeout). The security group drops it |
+| SNS | Email subscription on `portfolio-dev-alerts` is **confirmed** (it has a real subscription ARN) |
+| Alarms | All 6 `portfolio-dev-*` alarms `OK` |
+| Secret hygiene | The alert email and the origin secret don't appear in `evidence/05-terraform.txt` or the raw apply/plan/check files (checked by string match) |
+| Raw output | `evidence/raw/apply-dev-task10.txt`, `plan-dev-postapply-task10.txt`, `plan-dev-postapply2-task10.txt`, `postapply-checks-task10.txt` (gitignored) |
+| Still open | Cloudflare steps (`docs/CLOUDFLARE.md`, user), then the smoke test through `https://test.name.vn` (`evidence/07-smoke.txt`) and the "no header → 403 via Cloudflare" check |
+
 ## Skills note
 
 The devops-iac skill links to `reference/`, `scripts/` and `examples/` folders that don't exist; only its

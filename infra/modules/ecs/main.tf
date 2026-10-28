@@ -30,8 +30,14 @@ locals {
       readonlyRootFilesystem = true
       linuxParameters = {
         initProcessEnabled = true # Reaps zombies and forwards SIGTERM to nginx.
-        capabilities       = { drop = ["ALL"] }
+        capabilities       = { add = [], drop = ["ALL"] }
       }
+
+      # ECS returns these as empty lists. Declaring them keeps the plan clean
+      # (otherwise every plan shows a diff that forces a new task definition).
+      environment    = []
+      systemControls = []
+      volumesFrom    = []
 
       portMappings = [{
         name          = "http"
