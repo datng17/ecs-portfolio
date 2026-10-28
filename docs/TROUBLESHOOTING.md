@@ -92,3 +92,24 @@ Each entry: **Symptom → Root cause → Fix → Prevention**.
   `cmd /c "tar -c -C infra . | docker run --rm -i ... sh -c ""mkdir -p /w && tar -x -C /w && ..."""`.
   When building `sh -c` strings inside a pwsh command, escape `$?` as `` `$? ``, otherwise pwsh expands it
   first and prints `True`/`False` instead of the container's exit code.
+
+## T-008: tflint AWS plugin download timed out (Task 5)
+
+- **Symptom:** the first `tflint --init` for the network module failed with `Failed to install a plugin;
+  Failed to download checksums.txt ... dial tcp 185.199.109.133:443: i/o timeout`.
+- **Root cause:** a transient network timeout to `release-assets.githubusercontent.com`. The container also
+  had no persistent plugin directory, so every run had to download the ruleset again.
+- **Fix:** mount a named volume for the plugin cache and init once:
+  `docker run --rm -v "${PWD}:/data" -v tflint-plugins:/root/.tflint.d -w /data/envs/dev ghcr.io/terraform-linters/tflint:latest --config /data/.tflint.hcl --init`.
+  The retry installed `tflint-ruleset-aws` 0.50.0, and later runs reuse the volume.
+- **Prevention:** keep the `tflint-plugins` volume. In CI, cache `~/.tflint.d` and set `GITHUB_TOKEN` to
+  avoid rate limits.
+
+## T-009: `terraform plan -out=dev.tfplan` fails in pwsh with "Too many command line arguments"
+
+- **Symptom:** `terraform plan -input=false -lock-timeout=60s -out=dev.tfplan` exited 1 with
+  `Error: Too many command line arguments`.
+- **Root cause:** pwsh parses an unquoted `-out=dev.tfplan` as `-out=dev` plus a separate `.tfplan`
+  argument, so Terraform sees an extra positional argument.
+- **Fix:** quote flag arguments that contain `=` and `.`: `terraform plan '-input=false' '-out=dev.tfplan'`.
+- **Prevention:** always quote `-flag=value` arguments to native tools in pwsh scripts and docs.

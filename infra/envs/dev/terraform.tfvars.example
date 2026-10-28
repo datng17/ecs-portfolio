@@ -1,0 +1,16 @@
+# Copy to terraform.tfvars (gitignored) and adjust. Values below are the dev defaults.
+# Never commit terraform.tfvars: later tasks add alert_email and other private values here.
+
+account_id = "681990781993"
+region     = "ap-southeast-2"
+project    = "portfolio"
+env        = "dev"
+
+# Network
+vpc_cidr                   = "10.10.0.0/16"
+az_count                   = 2
+single_nat_gateway         = true  # 1 NAT in dev (~$43/month); prod uses one per AZ.
+enable_interface_endpoints = false # Off in dev for cost; on in prod.
+
+# Logs
+log_retention_days = 14

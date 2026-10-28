@@ -56,6 +56,7 @@ evidence/raw/
 !.vscode/extensions.json
 !.vscode/settings.json
 .kiro
+.agent
 
 # ---------- OS ----------
 .DS_Store

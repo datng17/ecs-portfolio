@@ -9,7 +9,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 2: Unit tests and lint (10/10 tests pass, lint 0 warnings, evidence in `evidence/01-unit-test.txt`)
 - [x] Task 3: Container (ARM64) (hadolint 0, Trivy 0 vulns / 0 misconfig, 27.9 MB compressed, smoke 21/21, committed locally)
 - [x] Task 4: Terraform bootstrap (state) (applied 2026-10-28, 7 resources, tflint 0, checkov 27/0/3 skipped, no drift)
-- [ ] Task 5: Network module + dev env wiring
+- [x] Task 5: Network module + dev env wiring (plan 26 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov module 62 passed / 0 failed / 5 skipped with inline justification, not applied)
 - [ ] Task 6: ECR + IAM modules (blocked by B-1 for the OIDC provider)
 - [ ] Task 7: ALB module
 - [ ] Task 8: ECS module (task definition + service + autoscaling)
