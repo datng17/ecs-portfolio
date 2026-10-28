@@ -14,3 +14,11 @@ enable_interface_endpoints = false # Off in dev for cost; on in prod.
 
 # Logs
 log_retention_days = 14
+
+# ECR
+ecr_force_delete = true # dev only: destroy removes the repo even with images; prod keeps false.
+
+# GitHub Actions OIDC (B-1): the SCP blocks creating/reading the provider, so the org admin creates it.
+# The gha-* roles can be planned and applied, but can't be assumed until this provider exists.
+github_oidc_provider_arn = "arn:aws:iam::681990781993:oidc-provider/token.actions.githubusercontent.com"
+github_repository        = "datng17/ecs-portfolio"

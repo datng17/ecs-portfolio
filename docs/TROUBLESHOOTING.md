@@ -25,7 +25,9 @@ Each entry: **Symptom → Root cause → Fix → Prevention**.
 - **Root cause:** an organization guardrail stops member accounts from managing IAM identity providers. This
   is a common pattern in sandbox and training accounts.
 - **Impact:** the planned GitHub Actions OIDC trust (Tasks 6, 11, 12) can't be created from this account.
-- **Fix:** pending a user decision (see PROGRESS.md "Open blockers").
+- **Fix:** user decision (Task 6): the org admin creates the provider. Terraform takes its ARN from the
+  `github_oidc_provider_arn` variable and has no resource or data source for it. The GitHub roles can't be
+  assumed until the provider exists (see PROGRESS.md B-1).
 - **Prevention:** add `iam:CreateOpenIDConnectProvider` to the preflight simulation for any CI/CD-over-OIDC
   design.
 

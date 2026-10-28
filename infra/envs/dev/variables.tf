@@ -59,3 +59,21 @@ variable "log_retention_days" {
   type        = number
   default     = 14
 }
+
+variable "ecr_force_delete" {
+  description = "Let terraform destroy remove the ECR repository with images in it. true in dev, false in prod."
+  type        = bool
+  default     = true
+}
+
+variable "github_oidc_provider_arn" {
+  description = "Existing GitHub Actions OIDC provider ARN. Created by the org admin (SCP blocks it here, see B-1); not created or read by Terraform."
+  type        = string
+  default     = "arn:aws:iam::681990781993:oidc-provider/token.actions.githubusercontent.com"
+}
+
+variable "github_repository" {
+  description = "GitHub repository (owner/name) trusted by the OIDC roles."
+  type        = string
+  default     = "datng17/ecs-portfolio"
+}

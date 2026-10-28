@@ -10,7 +10,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 3: Container (ARM64) (hadolint 0, Trivy 0 vulns / 0 misconfig, 27.9 MB compressed, smoke 21/21, committed locally)
 - [x] Task 4: Terraform bootstrap (state) (applied 2026-10-28, 7 resources, tflint 0, checkov 27/0/3 skipped, no drift)
 - [x] Task 5: Network module + dev env wiring (plan 26 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov module 62 passed / 0 failed / 5 skipped with inline justification, not applied)
-- [ ] Task 6: ECR + IAM modules (blocked by B-1 for the OIDC provider)
+- [x] Task 6: ECR + IAM modules (plan 38 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov ecr 3/0/0, iam 61/0/3, dev 164/0/8, not applied; OIDC provider ARN is a variable per B-1)
 - [ ] Task 7: ALB module
 - [ ] Task 8: ECS module (task definition + service + autoscaling)
 - [ ] Task 9: Observability module + prod env (see B-3)
@@ -102,6 +102,25 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | Raw output | `evidence/raw/{tflint,checkov}-bootstrap.txt`, `bootstrap-apply.txt`, `bootstrap-verify.txt` (gitignored) |
 | Teardown note | Removing the bucket (Task 18) needs `prevent_destroy` removed and the bucket emptied of all versions first |
 
+## ECR + IAM modules (Task 6)
+
+| Item | Result |
+|---|---|
+| ECR (`infra/modules/ecr`) | Repo `portfolio-dev-app`. `IMMUTABLE` tags, scan on push, `encryption_type = KMS` with the AWS-managed `aws/ecr` key (`kms_key_arn` variable for a CMK), `force_delete` from `ecr_force_delete` (true in dev). Lifecycle: untagged expire after 1 day, keep the 20 newest images |
+| Execution role | `portfolio-dev-ecs-execution`. Trust `ecs-tasks.amazonaws.com` with `aws:SourceAccount` + `aws:SourceArn` (ECS in this account/region). Inline policy replaces `AmazonECSTaskExecutionRolePolicy`: pull only from the env repo, logs only to `/ecs/portfolio-dev` |
+| Task role | `portfolio-dev-ecs-task`, same trust, no policies (nginx calls no AWS APIs) |
+| gha-plan | `portfolio-gha-plan`. `StringEquals` aud `sts.amazonaws.com`, sub `repo:datng17/ecs-portfolio:ref:refs/heads/main`. `ReadOnlyAccess` + inline: read state, write/delete only `envs/*/terraform.tfstate.tflock` |
+| gha-deploy-dev / -prod | `portfolio-gha-deploy-{dev,prod}`. sub `repo:datng17/ecs-portfolio:environment:{dev,prod}`. Push to `portfolio-<env>-app`, register/describe/deregister task definitions, `UpdateService`/`DescribeServices` on `service/portfolio-<env>-cluster/*`, `iam:PassRole` on the env's execution + task role only, with `iam:PassedToService = ecs-tasks.amazonaws.com` |
+| Ownership | GitHub roles are account-level, so only the dev stack creates them (`create_github_roles = true`); the prod stack (Task 9) passes `false` and creates only its ECS roles |
+| Naming contract for Task 8 | Cluster `portfolio-<env>-cluster`, log group `/ecs/portfolio-<env>`, task definition family prefix `portfolio-<env>-` (module outputs `ecs_cluster_name`, `app_log_group_name`, `task_definition_family_prefix`) |
+| OIDC provider | Not created, not read (B-1). ARN from `github_oidc_provider_arn`, default `arn:aws:iam::681990781993:oidc-provider/token.actions.githubusercontent.com` |
+| fmt / validate | exit 0 / valid |
+| tflint | envs/dev, modules/ecr, modules/iam: 0 findings, exit 0 |
+| checkov | ecr 3 passed / 0 failed. iam 61 / 0 / 3 skipped: CKV_AWS_356 on the execution policy and CKV_AWS_356 + CKV_AWS_111 on the deploy policy, because `ecr:GetAuthorizationToken` and the `ecs:*TaskDefinition*` actions have no resource-level permissions. dev (all modules) 164 / 0 / 8 |
+| Plan | 38 to add (26 network + 2 ECR + 10 IAM), 0 change, 0 destroy. Not applied |
+| Raw output | `evidence/raw/plan-dev-ecr-iam.txt`, `plan-dev-trust-policies.txt`, `checkov-ecr-iam.txt` (gitignored) |
+| Open risk | IAM may reject `CreateRole` if the Federated principal (the OIDC provider) doesn't exist yet. If the Task 10 apply fails on the `gha-*` roles, apply with `create_github_roles = false` until the admin creates the provider |
+
 ## Skills note
 
 The devops-iac skill links to `reference/`, `scripts/` and `examples/` folders that don't exist; only its
@@ -110,9 +129,18 @@ Terraform best practice instead.
 
 ## Open blockers / decisions
 
-### B-1: GitHub OIDC provider is blocked by SCP (decision needed, affects Tasks 6, 11, 12)
+### B-1: GitHub OIDC provider is blocked by SCP (decided: option 1; affects Tasks 6, 11, 12)
 
-SCP `p-8v7l4082` denies creating or reading IAM OIDC providers. Options:
+SCP `p-8v7l4082` denies creating or reading IAM OIDC providers.
+
+**Decision (user, Task 6):** option 1. Terraform neither creates nor reads the provider (no resource, no data
+source). The IAM module takes its ARN from `github_oidc_provider_arn`, defaulted in dev (`variables.tf` and
+`terraform.tfvars.example`) to `arn:aws:iam::681990781993:oidc-provider/token.actions.githubusercontent.com`.
+The org admin creates the provider later (URL `https://token.actions.githubusercontent.com`, audience
+`sts.amazonaws.com`). **Until then, `portfolio-gha-plan` and `portfolio-gha-deploy-{dev,prod}` can't be
+assumed**, so CI plan (Task 11) and CD (Task 12) can't authenticate to AWS.
+
+Options considered:
 
 1. **Recommended:** ask the org admin to create `token.actions.githubusercontent.com` (audience
    `sts.amazonaws.com`) in account 681990781993. Terraform then takes its ARN from a variable instead of
