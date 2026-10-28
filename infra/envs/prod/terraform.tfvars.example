@@ -1,0 +1,35 @@
+# Copy to terraform.tfvars (gitignored) and adjust. Values below are the prod defaults.
+# prod is validated and planned only; it is never applied in this project (R2).
+
+account_id = "681990781993"
+region     = "ap-southeast-2"
+project    = "portfolio"
+env        = "prod"
+
+# Network
+vpc_cidr                   = "10.20.0.0/16"
+az_count                   = 3
+single_nat_gateway         = false # One NAT per AZ.
+enable_interface_endpoints = true  # ECR/Logs endpoints: no image pulls through NAT.
+
+# Logs
+log_retention_days = 90
+
+# ECR
+ecr_force_delete = false
+
+# ALB
+certificate_domain      = "test.name.vn"
+origin_secret_version   = "1"
+alb_deletion_protection = true
+alb_logs_force_destroy  = false
+
+# ECS
+image_tag                = "initial"
+ecs_min_capacity         = 2
+ecs_max_capacity         = 5
+ecs_cpu_target_percent   = 60
+ecs_request_count_target = 1000
+
+# Observability (the account-wide budget lives in the dev stack)
+alert_email = "alerts@example.com" # Replace with a real address; a check block warns while it's example.com.

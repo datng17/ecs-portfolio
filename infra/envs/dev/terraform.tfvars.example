@@ -31,6 +31,10 @@ ecs_max_capacity         = 5
 ecs_cpu_target_percent   = 60
 ecs_request_count_target = 1000 # ALB requests per target per minute; tuned in Task 14.
 
+# Observability
+alert_email      = "alerts@example.com" # Replace with a real address; a check block warns while it's example.com.
+budget_limit_usd = 30                   # Account-wide budget, owned by the dev stack (B-3).
+
 # GitHub Actions OIDC (B-1): the SCP blocks creating/reading the provider, so the org admin creates it.
 # The gha-* roles can be planned and applied, but can't be assumed until this provider exists.
 github_oidc_provider_arn = "arn:aws:iam::681990781993:oidc-provider/token.actions.githubusercontent.com"

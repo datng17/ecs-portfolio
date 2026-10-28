@@ -137,3 +137,13 @@ Each entry: **Symptom → Root cause → Fix → Prevention**.
   default `enabled` now applies and checkov resolves it. Result: 252 passed / 0 failed.
 - **Prevention:** don't expose a security-relevant setting as an env variable unless an environment
   actually needs a different value. If one does, set a literal in the module call rather than a variable.
+
+## T-012: `terraform -chdir=infra/$d` failed with "cannot find the file specified" (Task 9)
+
+- **Symptom:** a validate loop over several directories printed `Error handling -chdir option: chdir infra/$d`
+  for every directory.
+- **Root cause:** the argument was written as `'-chdir=infra/$d'`. pwsh doesn't expand variables inside
+  single quotes, so Terraform received the literal text `$d`.
+- **Fix:** use double quotes for arguments that contain a variable: `terraform "-chdir=infra/$d" validate`.
+- **Prevention:** single quotes for literal `-flag=value` arguments (T-009), double quotes when the value
+  contains a variable.

@@ -79,3 +79,30 @@ module "ecs" {
   request_count_resource_label = module.alb.alb_request_count_resource_label
   request_count_target         = var.ecs_request_count_target
 }
+
+module "observability" {
+  source = "../../modules/observability"
+
+  name_prefix = local.name_prefix
+  alert_email = var.alert_email
+
+  alb_arn_suffix          = module.alb.alb_arn_suffix
+  target_group_arn_suffix = module.alb.target_group_arn_suffix
+  ecs_cluster_name        = module.ecs.cluster_name
+  ecs_service_name        = module.ecs.service_name
+  ecs_min_capacity        = var.ecs_min_capacity
+  ecs_max_capacity        = var.ecs_max_capacity
+
+  # The budget is account-wide (B-3), so only the dev stack owns it, like the GitHub roles.
+  create_budget    = true
+  budget_name      = "${var.project}-account-monthly-cost"
+  budget_limit_usd = var.budget_limit_usd
+}
+
+# Plans work with the example address, but nobody would get the alerts.
+check "alert_email_is_real" {
+  assert {
+    condition     = !endswith(lower(var.alert_email), "@example.com")
+    error_message = "alert_email is still the example.com placeholder. Set a real address in terraform.tfvars before applying."
+  }
+}

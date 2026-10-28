@@ -131,3 +131,14 @@ variable "ecs_request_count_target" {
   type        = number
   default     = 1000
 }
+
+variable "alert_email" {
+  description = "Receives SNS alarm notifications and budget alerts. Set it only in the gitignored terraform.tfvars."
+  type        = string
+}
+
+variable "budget_limit_usd" {
+  description = "Monthly account cost budget in USD (alerts at 50/80/100 % actual and 100 % forecast)."
+  type        = number
+  default     = 30
+}

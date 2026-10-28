@@ -112,3 +112,23 @@ output "app_log_group_name" {
   description = "Container log group."
   value       = module.ecs.log_group_name
 }
+
+output "alerts_topic_arn" {
+  description = "SNS alerts topic (KMS CMK). Confirm the email subscription after the first apply."
+  value       = module.observability.sns_topic_arn
+}
+
+output "alarm_names" {
+  description = "CloudWatch alarm names."
+  value       = module.observability.alarm_names
+}
+
+output "dashboard_url" {
+  description = "CloudWatch dashboard."
+  value       = module.observability.dashboard_url
+}
+
+output "budget_name" {
+  description = "Account-wide monthly cost budget."
+  value       = module.observability.budget_name
+}

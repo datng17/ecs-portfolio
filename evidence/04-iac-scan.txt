@@ -1,0 +1,78 @@
+# IaC scan evidence (Task 9)
+Date: 2026-10-28 15:49 +07:00   Base commit: e8857c4 + Task 9 working tree
+Tools: Terraform 1.16.3, TFLint 0.65.0 + tflint-ruleset-aws 0.50.0 (Docker), checkov 3.3.30 (Docker)
+
+## terraform fmt -recursive -check (infra/)
+exit: 0
+
+## terraform validate
+bootstrap : Success! The configuration is valid.  (exit 0)
+envs/dev : Success! The configuration is valid.  (exit 0)
+envs/prod : Success! The configuration is valid.  (exit 0)
+modules/observability : Success! The configuration is valid.  (exit 0)
+
+# tflint (ghcr.io/terraform-linters/tflint:latest, ruleset aws 0.50.0, call_module_type=local)
+## tflint bootstrap
+tflint exit: 0
+## tflint envs/dev
+tflint exit: 0
+## tflint envs/prod
+tflint exit: 0
+## tflint modules/network
+tflint exit: 0
+## tflint modules/ecr
+tflint exit: 0
+## tflint modules/iam
+tflint exit: 0
+## tflint modules/alb
+tflint exit: 0
+## tflint modules/ecs
+tflint exit: 0
+## tflint modules/observability
+tflint exit: 0
+
+## checkov -d infra --framework terraform (bootstrap, envs/dev, envs/prod, all modules)
+terraform scan results:
+
+Passed checks: 337, Failed checks: 0, Skipped checks: 43
+
+
+checkov exit: 0
+
+## checkov -d infra/modules/observability
+Passed checks: 30, Failed checks: 0, Skipped checks: 3
+checkov exit: 0
+
+## Skipped checks (unique). Each has an inline checkov:skip reason in the source file.
+## The 43 total counts a module once per env stack that calls it.
+CKV_AWS_109  module.ecs.aws_iam_policy_document.logs_kms                  /modules/ecs/main.tf:103-140
+CKV_AWS_109  module.network.aws_iam_policy_document.flow_logs_kms         /modules/network/main.tf:201-239
+CKV_AWS_109  module.observability.aws_iam_policy_document.sns_kms         /modules/observability/main.tf:31-59
+CKV_AWS_111  module.ecs.aws_iam_policy_document.logs_kms                  /modules/ecs/main.tf:103-140
+CKV_AWS_111  module.iam.aws_iam_policy_document.gha_deploy                /modules/iam/main.tf:227-301
+CKV_AWS_111  module.network.aws_iam_policy_document.flow_logs_kms         /modules/network/main.tf:201-239
+CKV_AWS_111  module.observability.aws_iam_policy_document.sns_kms         /modules/observability/main.tf:31-59
+CKV_AWS_144  aws_s3_bucket.state                                          /bootstrap/main.tf:8-17
+CKV_AWS_144  module.alb.aws_s3_bucket.access_logs                         /modules/alb/main.tf:126-134
+CKV_AWS_145  module.alb.aws_s3_bucket.access_logs                         /modules/alb/main.tf:126-134
+CKV_AWS_150  module.alb.aws_lb.this                                       /modules/alb/main.tf:235-265
+CKV_AWS_18   aws_s3_bucket.state                                          /bootstrap/main.tf:8-17
+CKV_AWS_18   module.alb.aws_s3_bucket.access_logs                         /modules/alb/main.tf:126-134
+CKV_AWS_337  module.alb.aws_ssm_parameter.origin_secret                   /modules/alb/main.tf:113-121
+CKV_AWS_338  module.ecs.aws_cloudwatch_log_group.app                      /modules/ecs/main.tf:155-160
+CKV_AWS_338  module.network.aws_cloudwatch_log_group.flow_logs            /modules/network/main.tf:254-259
+CKV_AWS_356  module.ecs.aws_iam_policy_document.logs_kms                  /modules/ecs/main.tf:103-140
+CKV_AWS_356  module.iam.aws_iam_policy_document.execution                 /modules/iam/main.tf:63-91
+CKV_AWS_356  module.iam.aws_iam_policy_document.gha_deploy                /modules/iam/main.tf:227-301
+CKV_AWS_356  module.network.aws_iam_policy_document.flow_logs_kms         /modules/network/main.tf:201-239
+CKV_AWS_356  module.observability.aws_iam_policy_document.sns_kms         /modules/observability/main.tf:31-59
+CKV_AWS_378  module.alb.aws_lb_target_group.app                           /modules/alb/main.tf:267-290
+CKV_AWS_394  module.network.aws_availability_zones.available              /modules/network/main.tf:5-12
+CKV2_AWS_28  module.alb.aws_lb.this                                       /modules/alb/main.tf:235-265
+CKV2_AWS_62  aws_s3_bucket.state                                          /bootstrap/main.tf:8-17
+CKV2_AWS_62  module.alb.aws_s3_bucket.access_logs                         /modules/alb/main.tf:126-134
+
+## Plans (not applied)
+envs/dev : Plan: 111 to add, 0 to change, 0 to destroy.
+envs/prod: Plan: 118 to add, 0 to change, 0 to destroy.
+Both plans warn on check "alert_email_is_real": the gitignored tfvars still hold the alerts@example.com placeholder.

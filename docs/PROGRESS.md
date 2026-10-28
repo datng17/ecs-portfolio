@@ -13,7 +13,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 6: ECR + IAM modules (plan 38 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov ecr 3/0/0, iam 61/0/3, dev 164/0/8, not applied; OIDC provider ARN is a variable per B-1)
 - [x] Task 7: ALB module (plan 84 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov alb 53/0/8, infra minus bootstrap 217/0/16, not applied)
 - [x] Task 8: ECS module (terraform test 11/11 pass, plan 98 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov ecs 35/0/4, infra minus bootstrap 252/0/20, Dockerfile gains `VOLUME`, not applied)
-- [ ] Task 9: Observability module + prod env (see B-3)
+- [x] Task 9: Observability module + prod env (dev plan 111 / 0 / 0, prod plan 118 / 0 / 0, fmt + validate OK, tflint 0 on all 9 dirs, checkov all of `infra/` 337/0/43, observability 30/0/3, evidence in `evidence/04-iac-scan.txt`, not applied)
 - [ ] Task 10: First dev deploy 🛑 apply; Cloudflare steps done by the user
 - [ ] Task 11: CI pipeline 🛑 GitHub push (blocked by B-1)
 - [ ] Task 12: CD pipeline (blocked by B-1)
@@ -162,6 +162,26 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | Plan | 98 to add (84 earlier + 14 ECS), 0 change, 0 destroy. Not applied |
 | Raw output | `evidence/raw/terraform-test-ecs.txt`, `plan-dev-ecs.txt`, `checkov-ecs.txt`, `checkov-infra-task8.txt`, `build-task8.txt` (gitignored) |
 | Task 10 notes | `image_tag` defaults to `initial`, which doesn't exist in ECR. Push `:<sha>` first and apply with `image_tag = "<sha>"`, or the tasks fail to pull and the circuit breaker trips. Terraform owns only the first revision: later `image_tag` changes register a revision the service ignores, so roll out through CD. Trivy wasn't re-run, since only image metadata (`VOLUME`) changed; CI rescans it in Task 11 |
+
+## Observability module + prod env (Task 9)
+
+| Item | Result |
+|---|---|
+| Module | `infra/modules/observability`, wired into both envs as `module.observability`. Dimensions come from the ALB (`alb_arn_suffix`, `target_group_arn_suffix`) and ECS (`cluster_name`, `service_name`) outputs |
+| KMS | CMK `alias/portfolio-<env>-alerts`, rotation on, 7-day deletion window. Key policy: root admin, plus `kms:GenerateDataKey*` / `kms:Decrypt` for `cloudwatch.amazonaws.com` and `budgets.amazonaws.com` (the SNS docs' form for AWS event sources) |
+| SNS | Topic `portfolio-<env>-alerts`, SSE with the CMK. Topic policy: account owner, CloudWatch alarms (`aws:SourceAccount` + `aws:SourceArn` `arn:aws:cloudwatch:ap-southeast-2:<acct>:alarm:*`), Budgets (`aws:SourceArn` `arn:aws:budgets::<acct>:*`), deny publish without TLS. Email subscription to `alert_email` (pending until confirmed) |
+| Alarms | All 1-minute periods, 3 of 5 datapoints, `treat_missing_data = notBreaching`, `alarm_actions` and `ok_actions` = the topic. `alb-elb-5xx` (Sum >= 5), `alb-target-5xx-rate` (metric math `IF(requests >= 20, 100 * FILL(errors,0) / requests, 0)` > 1 %), `tg-unhealthy-hosts` (Maximum >= 1), `alb-latency-p95` (p95 TargetResponseTime > 0.3 s, the SLO), `ecs-cpu-high` (> 80 %, above the 60 % scaling target), `ecs-memory-high` (> 80 %) |
+| Dashboard | `portfolio-<env>`: alarm status, requests, ELB/target 5xx and ELB 4xx, target 5xx rate with the 0.1 % SLO line, p50/p95/p99 latency with the 300 ms line, healthy/unhealthy hosts, CPU/memory with the 60 % and 80 % lines, running vs desired tasks (Container Insights) with min/max lines |
+| Budget | `portfolio-account-monthly-cost`, COST, 30.00 USD monthly, ACTUAL > 50/80/100 % and FORECASTED > 100 %, each to the SNS topic and directly to `alert_email` (works before the SNS subscription is confirmed). Account-wide per B-3, so only the dev stack creates it (`create_budget = true`); prod passes `false` |
+| Cost allocation tags | Not in Terraform (B-3, T-003: linked account). `default_tags` still put Project/Env/Owner/CostCenter/ManagedBy on every resource, ready for the payer account to activate |
+| `alert_email` | Required variable with an email-format validation, set only in the gitignored `terraform.tfvars`. Both tfvars hold the placeholder `alerts@example.com`; a `check` block warns on every plan until it's replaced. **Set a real address before the Task 10 apply** |
+| prod env | `infra/envs/prod`: same modules; `10.20.0.0/16`, 3 AZs, NAT per AZ (3), ECR/Logs interface endpoints on, log retention 90 days, ECR `force_delete = false`, ALB deletion protection on, ALB-log bucket `force_destroy = false`. `create_github_roles = false` (dev owns the gha-* roles) and no budget. Same ACM certificate (`test.name.vn`), since only one exists; a real prod would get its own hostname and cert. Validate and plan only (R2) |
+| fmt / validate | exit 0 / valid (bootstrap, dev, prod, observability) |
+| tflint | 0.65.0 + AWS ruleset 0.50.0: bootstrap, envs/dev, envs/prod and all 6 modules, 0 findings each |
+| checkov | 3.3.30. All of `infra/` (bootstrap + both envs + modules): 337 passed / 0 failed / 43 skipped (26 unique skips; modules are counted once per env that calls them). observability alone: 30 / 0 / 3 (the same 3 key-policy `Resource "*"` skips as the network and ECS CMKs) |
+| Plans | dev: 111 to add (98 earlier + 13 observability), 0 change, 0 destroy. prod: 118 to add, 0 change, 0 destroy (no gha-* roles, no budget). Not applied |
+| Raw output | `evidence/raw/plan-dev-task9.txt`, `plan-prod-task9.txt`, `tflint-task9.txt`, `checkov-infra-task9*.txt`, `checkov-observability.txt` (gitignored) |
+| Task 10 notes | Confirm the SNS email after apply, otherwise alarms reach no one (budget emails still arrive directly). Alarms on ALB/ECS metrics start in `INSUFFICIENT_DATA` and move to `OK` once traffic and tasks report |
 
 ## Skills note
 
