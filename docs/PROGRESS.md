@@ -12,7 +12,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 5: Network module + dev env wiring (plan 26 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov module 62 passed / 0 failed / 5 skipped with inline justification, not applied)
 - [x] Task 6: ECR + IAM modules (plan 38 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov ecr 3/0/0, iam 61/0/3, dev 164/0/8, not applied; OIDC provider ARN is a variable per B-1)
 - [x] Task 7: ALB module (plan 84 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov alb 53/0/8, infra minus bootstrap 217/0/16, not applied)
-- [ ] Task 8: ECS module (task definition + service + autoscaling)
+- [x] Task 8: ECS module (terraform test 11/11 pass, plan 98 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov ecs 35/0/4, infra minus bootstrap 252/0/20, Dockerfile gains `VOLUME`, not applied)
 - [ ] Task 9: Observability module + prod env (see B-3)
 - [ ] Task 10: First dev deploy 🛑 apply; Cloudflare steps done by the user
 - [ ] Task 11: CI pipeline 🛑 GitHub push (blocked by B-1)
@@ -141,6 +141,27 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | Plan | 84 to add (38 earlier + 46 ALB), 0 change, 0 destroy. Not applied |
 | Raw output | `evidence/raw/plan-dev-alb.txt`, `checkov-alb.txt` (gitignored) |
 | Check in Task 11 | `gha-plan` refreshes the SecureString parameter. `ReadOnlyAccess` covers `ssm:GetParameter` and the `aws/ssm` key policy allows decrypt through SSM for account principals, so no extra IAM is expected; confirm on the first CI plan |
+
+## ECS module (Task 8)
+
+| Item | Result |
+|---|---|
+| Module | `infra/modules/ecs`, wired into `infra/envs/dev` as `module.ecs`. Cluster name, log group and family come from the IAM module outputs, so the deploy and execution role scopes always match |
+| Cluster | `portfolio-dev-cluster`, Container Insights `enabled` (module variable also accepts `enhanced`/`disabled`), capacity provider FARGATE only |
+| Logs | `/ecs/portfolio-dev`, retention from `log_retention_days` (14 in dev), encrypted with a new CMK `alias/portfolio-dev-ecs-logs` (rotation on, logs service limited to this group by encryption context; ~$1/month) |
+| Task definition | Family `portfolio-dev-app`, FARGATE/awsvpc, 256 CPU / 512 MiB, LINUX/ARM64, separate execution and task roles (precondition). Container `app`: user `101:101`, `readonlyRootFilesystem`, all capabilities dropped, `initProcessEnabled`, port 8080, health check `wget http://127.0.0.1:8080/healthz` (30 s / 5 s / 3 retries / 10 s start), awslogs `non-blocking` with a 25 MB buffer, stop timeout 30 s |
+| Writable paths | Task-local volumes `tmp` → `/tmp` and `var-cache-nginx` → `/var/cache/nginx`. Fargate has no tmpfs, and a bind mount is root-owned 0755 unless the image declares the path as `VOLUME`, so the Dockerfile now has `VOLUME ["/tmp", "/var/cache/nginx"]` ([AWS bind mount docs](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/bind-mounts.html)) |
+| Image check | hadolint 0, arm64 build OK. `docker run --read-only --user 101:101 --cap-drop ALL` with the anonymous volumes (same copy-from-image behaviour): `/tmp` 1777, `/var/cache/nginx` owned by nginx, `nginx.pid` written, writes to `/etc` fail, `/healthz` 200, container healthy. Compose (tmpfs) smoke still PASS |
+| Service | `portfolio-dev-app`, FARGATE `LATEST`, private subnets, no public IP, SG `portfolio-dev-ecs-sg` (in: 8080 from the ALB SG only; out: 443 only). Desired 2, min healthy 100 %, max 200 %, grace period 30 s, circuit breaker with rollback, AZ rebalancing, ECS managed tags, ECS Exec off. `ignore_changes = [task_definition, desired_count]` |
+| Load balancer ordering | The HTTPS default action is a fixed 403, so the target group is only attached through the origin-verified rule. The service waits on both the listener and that rule (`terraform_data.load_balancer_ready`), because ECS rejects a target group that nothing forwards to |
+| Autoscaling | Scalable target 2–5. Target tracking `ECSServiceAverageCPUUtilization` 60 % and `ALBRequestCountPerTarget` 1000 req/target/min (`ecs_request_count_target`, tune in Task 14), both with scale-out cooldown 60 s and scale-in 300 s |
+| `terraform test` | `infra/modules/ecs/tests/ecs.tftest.hcl`, mocked AWS provider (no credentials). 11 runs: cluster, task hardening, service, autoscaling, outputs (mock apply), plus 6 rejection cases (invalid Fargate size, shared roles, root user, untagged image, single subnet, max < min). 11 passed / 0 failed. Mutation check: changing the CPU target to 70 and the user to 1000 fails the 2 matching runs |
+| fmt / validate | exit 0 / valid (module and dev) |
+| tflint | modules/ecs and envs/dev: 0 findings, exit 0 |
+| checkov | ecs 35 passed / 0 failed / 4 skipped (the 3 key-policy `Resource "*"` checks and CKV_AWS_338 retention, same reasons as the network module). All of `infra/` except bootstrap: 252 / 0 / 20 (see T-011) |
+| Plan | 98 to add (84 earlier + 14 ECS), 0 change, 0 destroy. Not applied |
+| Raw output | `evidence/raw/terraform-test-ecs.txt`, `plan-dev-ecs.txt`, `checkov-ecs.txt`, `checkov-infra-task8.txt`, `build-task8.txt` (gitignored) |
+| Task 10 notes | `image_tag` defaults to `initial`, which doesn't exist in ECR. Push `:<sha>` first and apply with `image_tag = "<sha>"`, or the tasks fail to pull and the circuit breaker trips. Terraform owns only the first revision: later `image_tag` changes register a revision the service ignores, so roll out through CD. Trivy wasn't re-run, since only image metadata (`VOLUME`) changed; CI rescans it in Task 11 |
 
 ## Skills note
 

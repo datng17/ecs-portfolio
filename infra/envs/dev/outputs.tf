@@ -87,3 +87,28 @@ output "alb_access_logs_bucket" {
   description = "S3 bucket with ALB access logs."
   value       = module.alb.access_logs_bucket
 }
+
+output "ecs_cluster_name" {
+  description = "ECS cluster (ECS_CLUSTER in CD)."
+  value       = module.ecs.cluster_name
+}
+
+output "ecs_service_name" {
+  description = "ECS service (ECS_SERVICE in CD)."
+  value       = module.ecs.service_name
+}
+
+output "ecs_task_definition_family" {
+  description = "Task definition family (CD downloads the latest revision of it)."
+  value       = module.ecs.task_definition_family
+}
+
+output "ecs_container_name" {
+  description = "Container the CD pipeline renders the image into."
+  value       = module.ecs.container_name
+}
+
+output "app_log_group_name" {
+  description = "Container log group."
+  value       = module.ecs.log_group_name
+}

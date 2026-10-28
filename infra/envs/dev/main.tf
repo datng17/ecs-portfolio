@@ -50,3 +50,32 @@ module "alb" {
   access_logs_retention_days = var.log_retention_days
   access_logs_force_destroy  = var.alb_logs_force_destroy
 }
+
+module "ecs" {
+  source = "../../modules/ecs"
+
+  name_prefix = local.name_prefix
+
+  # Names come from the IAM module, so the deploy and execution role scopes always match.
+  cluster_name       = module.iam.ecs_cluster_name
+  log_group_name     = module.iam.app_log_group_name
+  task_family        = "${module.iam.task_definition_family_prefix}app"
+  execution_role_arn = module.iam.execution_role_arn
+  task_role_arn      = module.iam.task_role_arn
+
+  # First revision only. CD registers later revisions; the service ignores task_definition changes.
+  container_image    = "${module.ecr.repository_url}:${var.image_tag}"
+  log_retention_days = var.log_retention_days
+
+  vpc_id                     = module.network.vpc_id
+  private_subnet_ids         = module.network.private_subnet_ids
+  alb_security_group_id      = module.alb.security_group_id
+  target_group_arn           = module.alb.target_group_arn
+  load_balancer_dependencies = [module.alb.https_listener_arn, module.alb.origin_verified_rule_arn]
+
+  min_capacity                 = var.ecs_min_capacity
+  max_capacity                 = var.ecs_max_capacity
+  cpu_target_percent           = var.ecs_cpu_target_percent
+  request_count_resource_label = module.alb.alb_request_count_resource_label
+  request_count_target         = var.ecs_request_count_target
+}

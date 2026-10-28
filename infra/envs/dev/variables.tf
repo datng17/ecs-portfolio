@@ -101,3 +101,33 @@ variable "alb_logs_force_destroy" {
   type        = bool
   default     = true
 }
+
+variable "image_tag" {
+  description = "Image tag (git SHA) for the first task definition revision. Push it to ECR before the full apply (Task 10). CD rolls out later tags."
+  type        = string
+  default     = "initial"
+}
+
+variable "ecs_min_capacity" {
+  description = "Minimum (and initial) task count."
+  type        = number
+  default     = 2
+}
+
+variable "ecs_max_capacity" {
+  description = "Maximum task count."
+  type        = number
+  default     = 5
+}
+
+variable "ecs_cpu_target_percent" {
+  description = "Target tracking: average service CPU percent."
+  type        = number
+  default     = 60
+}
+
+variable "ecs_request_count_target" {
+  description = "Target tracking: ALB requests per target per minute (tuned in Task 14)."
+  type        = number
+  default     = 1000
+}

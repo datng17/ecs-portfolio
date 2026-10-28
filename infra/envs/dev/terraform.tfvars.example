@@ -24,6 +24,13 @@ origin_secret_version   = "1"            # Bump to rotate X-Origin-Verify, then 
 alb_deletion_protection = false          # dev only; prod keeps true.
 alb_logs_force_destroy  = true           # dev only; prod keeps false.
 
+# ECS
+image_tag                = "initial" # Set to the pushed git SHA before the full apply (Task 10).
+ecs_min_capacity         = 2
+ecs_max_capacity         = 5
+ecs_cpu_target_percent   = 60
+ecs_request_count_target = 1000 # ALB requests per target per minute; tuned in Task 14.
+
 # GitHub Actions OIDC (B-1): the SCP blocks creating/reading the provider, so the org admin creates it.
 # The gha-* roles can be planned and applied, but can't be assumed until this provider exists.
 github_oidc_provider_arn = "arn:aws:iam::681990781993:oidc-provider/token.actions.githubusercontent.com"

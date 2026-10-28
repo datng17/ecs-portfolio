@@ -72,6 +72,13 @@ COPY --from=builder /app/build          /usr/share/nginx/portfolio
 USER 101
 EXPOSE 8080
 
+# The only writable paths under a read-only root filesystem (pid file, temp and cache files).
+# On Fargate the task definition mounts ephemeral volumes here. A Fargate bind mount is
+# root-owned 0755 unless the image declares the same path as VOLUME, in which case ECS copies
+# the image's contents and ownership (/tmp 1777, /var/cache/nginx owned by 101). Locally,
+# docker-compose mounts tmpfs over the same paths.
+VOLUME ["/tmp", "/var/cache/nginx"]
+
 # busybox wget ships in the base image; no extra packages needed.
 # Exec form: no shell needed, and busybox wget exits 1 on any failure.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

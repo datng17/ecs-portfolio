@@ -126,3 +126,14 @@ Each entry: **Symptom → Root cause → Fix → Prevention**.
   `terraform providers lock '-platform=windows_amd64' '-platform=windows_386' '-platform=linux_amd64' '-platform=linux_arm64' '-platform=darwin_arm64' hashicorp/http hashicorp/random`.
   It finished in seconds and the lock file now has 5 `h1:` hashes per provider.
 - **Prevention:** when adding a provider, pass its address to `providers lock` instead of relocking all of them.
+
+## T-011: checkov CKV_AWS_65 failed only when scanning from the dev env (Task 8)
+
+- **Symptom:** `checkov -d modules/ecs` passed CKV_AWS_65 (Container Insights), but the scan of all of
+  `infra/` failed it for `module.ecs.aws_ecs_cluster.this`, called from `envs/dev/main.tf`.
+- **Root cause:** dev passed `container_insights = var.ecs_container_insights`. checkov doesn't resolve an
+  env-level variable through a module call, so it saw an unresolved value instead of `"enabled"`.
+- **Fix:** removed the env-level variable (it had no use: dev and prod both want `enabled`). The module
+  default `enabled` now applies and checkov resolves it. Result: 252 passed / 0 failed.
+- **Prevention:** don't expose a security-relevant setting as an env variable unless an environment
+  actually needs a different value. If one does, set a literal in the module call rather than a variable.
