@@ -15,7 +15,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 8: ECS module (terraform test 11/11 pass, plan 98 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov ecs 35/0/4, infra minus bootstrap 252/0/20, Dockerfile gains `VOLUME`, not applied)
 - [x] Task 9: Observability module + prod env (dev plan 111 / 0 / 0, prod plan 118 / 0 / 0, fmt + validate OK, tflint 0 on all 9 dirs, checkov all of `infra/` 337/0/43, observability 30/0/3, evidence in `evidence/04-iac-scan.txt`, not applied)
 - [x] Task 10: First dev deploy (109 added, no drift after T-013 fix, Cloudflare done by the user, live smoke 22/22 via `https://test.name.vn`, direct ALB access times out, no header → ALB 403, 2 tasks HEALTHY in 2 AZs, evidence in `evidence/07-smoke.txt`; open risk B-4)
-- [ ] Task 11: CI pipeline 🛑 GitHub push (blocked by B-1)
+- [ ] Task 11: CI pipeline 🛑 GitHub push (workflow written and validated locally, committed locally; push awaits approval; plan jobs need B-1)
 - [ ] Task 12: CD pipeline (blocked by B-1)
 - [ ] Task 13: Load test and SLOs
 - [ ] Task 14: Autoscaling verification
@@ -208,6 +208,20 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | No header → 403 | Listener: default fixed-response 403 `text/plain` `Forbidden`; rule 100 `http-header X-Origin-Verify` (1 value) → forward. ALB access logs: 9 requests 00:41–01:26 UTC with `elb_status 403`, target `-`, `fixed-response`, rule 0 (before the Request rule existed); from 01:31:39 UTC forwarded by rule 100 with 200 |
 | Tasks / targets (re-check) | `537c84b2…` ap-southeast-2b and `e6e2eb56…` ap-southeast-2a, both RUNNING / HEALTHY, revision 1. Targets 10.10.135.204 (2a) and 10.10.158.45 (2b) healthy |
 | Evidence | `evidence/07-smoke.txt` (redacted; secret and alert email checked absent by in-process match). Raw: `evidence/raw/smoke-live-task10.txt`, `smoke-live-ps1-task10.txt`, `smoke-local-task10.txt` (gitignored) |
+
+## CI pipeline (Task 11)
+
+| Item | Result |
+|---|---|
+| Workflow | `.github/workflows/ci.yml`: `app`, `container` (ubuntu-24.04-arm), `iac`, `secrets` in parallel, then `plan (dev)` / `plan (prod)`. Triggers: push and PR to `main`, manual dispatch |
+| Pinning | actions/checkout v7.0.1, actions/setup-node v7.1.0, hashicorp/setup-terraform v4.0.1, aws-actions/configure-aws-credentials v6.3.0, each by full SHA (resolved with `git ls-remote`, peeled tags). Scanner images by digest, same versions as the local evidence: hadolint 2.15.1, Trivy 0.76.1, tflint 0.65.0, checkov 3.3.30, gitleaks 8.30.1. Terraform 1.16.3 |
+| Permissions | Workflow `contents: read`; `id-token: write` only on the plan job. `persist-credentials: false` on every checkout |
+| Plan inputs | No tfvars in CI. Secret `ALERT_EMAIL`; repo variables `AWS_PLAN_ROLE_ARN`, `TF_DEV_IMAGE_TAG`, `TF_DEV_ORIGIN_SECRET_VERSION` (unset values fall back to the variable defaults). The email is redacted from the job summary; the binary plan is never uploaded |
+| Plan gating | Runs only on `main`, not on PRs, and only when `AWS_PLAN_ROLE_ARN` is set, so CI stays green (plan skipped) until the OIDC provider exists (B-1). Role ARN and trust confirmed with `aws iam get-role`: sub `repo:datng17/ecs-portfolio:ref:refs/heads/main`, aud `sts.amazonaws.com` |
+| actionlint | 1.7.12 (Docker, with shellcheck): 0 findings |
+| Local dry run of the CI commands | checkov (CI digest, read-only mount): 337 passed / 0 failed / 43 skipped. tflint (CI digest) on all 9 dirs: exit 0. gitleaks (CI digest, `--log-opts=77536ad..HEAD`, read-only mount with `safe.directory` via env): 13 commits, no leaks |
+| GitHub setup checklist | `docs/RUNBOOK.md`, "GitHub setup" |
+| Not yet verified | The CI run itself (needs the push) and the plan jobs (need B-1 and the variables) |
 
 ## Skills note
 
