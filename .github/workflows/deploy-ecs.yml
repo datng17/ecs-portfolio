@@ -1,0 +1,243 @@
+# Reusable deploy job, called by cd.yml once per environment (dev, then prod when enabled).
+#
+#   OIDC (portfolio-gha-deploy-<env>, sub repo:<repo>:environment:<env>)
+#   -> build arm64 image, Trivy gate, push :<sha> to portfolio-<env>-app (tags are immutable; an existing tag is reused)
+#   -> render: the revision the service runs now (with its tags), new image only
+#   -> deploy: register + update-service, wait for stability
+#   -> verify: the service's primary deployment is the new revision and COMPLETED (not a circuit-breaker rollback)
+#   -> smoke test the public URL (scripts/smoke.sh)
+#   -> on any failure after the deploy started: update-service back to the previous revision, wait, deregister the new one
+#
+# Ownership split (design.md): Terraform owns the service; CD owns task-definition revisions.
+name: Deploy to ECS (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub environment and stack name (dev or prod)
+        type: string
+        required: true
+      sha:
+        description: Commit to build and deploy (the CI run's head SHA)
+        type: string
+        required: true
+      smoke-url:
+        description: Public base URL for the post-deploy smoke test
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  AWS_REGION: ap-southeast-2
+  # Same Trivy as CI (bump the tag comment and digest together).
+  TRIVY_IMAGE: aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c # 0.76.1
+
+jobs:
+  deploy:
+    name: deploy (${{ inputs.environment }})
+    # Native arm64 build, same runner as the CI container job. AWS CLI and jq are preinstalled.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    # `environment:` sets the OIDC sub claim to repo:<repo>:environment:<env> (the deploy role trust) and applies
+    # the environment's protection rules (branch policy; reviewers on prod) before any AWS access.
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.smoke-url }}
+    permissions:
+      contents: read
+      id-token: write
+    # One deploy per environment at a time. Queued runs wait instead of cancelling a rollout halfway.
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      ENV_NAME: ${{ inputs.environment }}
+      SHA: ${{ inputs.sha }}
+      SMOKE_URL: ${{ inputs.smoke-url }}
+      # Naming contract from infra/modules/{iam,ecr,ecs}.
+      CLUSTER: portfolio-${{ inputs.environment }}-cluster
+      SERVICE: portfolio-${{ inputs.environment }}-app
+      REPOSITORY: portfolio-${{ inputs.environment }}-app
+      CONTAINER: app
+    steps:
+      - name: Preflight
+        env:
+          ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::Environment variable AWS_DEPLOY_ROLE_ARN is not set on the '$ENV_NAME' environment (docs/RUNBOOK.md, GitHub setup)."
+            exit 1
+          fi
+          if ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::Input sha is not a full commit SHA."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: gha-deploy-${{ inputs.environment }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: ECR login
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - name: Image tag
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          image="$REGISTRY/$REPOSITORY:$SHA"
+          echo "uri=$image" >> "$GITHUB_OUTPUT"
+          # Immutable tags: a re-run for the same commit must reuse the pushed image, not push again.
+          if aws ecr describe-images --repository-name "$REPOSITORY" --image-ids "imageTag=$SHA" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Image $image already in ECR, skipping build."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build (native arm64)
+        if: steps.image.outputs.exists != 'true'
+        env:
+          IMAGE: ${{ steps.image.outputs.uri }}
+        # Single-platform image manifest (no attestation index), same as the image Terraform first deployed.
+        run: docker buildx build --platform linux/arm64 --provenance=false --sbom=false --load -t "$IMAGE" .
+
+      - name: Trivy image (HIGH/CRITICAL gate)
+        if: steps.image.outputs.exists != 'true'
+        env:
+          IMAGE: ${{ steps.image.outputs.uri }}
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" \
+            image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "$IMAGE"
+
+      - name: Push
+        if: steps.image.outputs.exists != 'true'
+        env:
+          IMAGE: ${{ steps.image.outputs.uri }}
+        run: docker push "$IMAGE"
+
+      # Start from the revision the service runs now, not the newest in the family: after a failed deploy the
+      # newest revision may be the broken one. Tags are included so CD revisions keep the Terraform default_tags.
+      - name: Current task definition
+        id: current
+        run: |
+          svc=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].[status, taskDefinition]' --output text)
+          read -r status arn <<< "$svc"
+          if [ "$status" != ACTIVE ] || [ -z "$arn" ] || [ "$arn" = None ]; then
+            echo "::error::Service $CLUSTER/$SERVICE not found or not ACTIVE (status: $status)."
+            exit 1
+          fi
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
+          echo "Current revision: $arn"
+          if ! json=$(aws ecs describe-task-definition --task-definition "$arn" --include TAGS --output json); then
+            echo "::warning::DescribeTaskDefinition with tags failed; the new revision will be registered without tags."
+            json=$(aws ecs describe-task-definition --task-definition "$arn" --output json)
+          fi
+          printf '%s' "$json" | jq '.taskDefinition + {tags: (.tags // [])}' > "$RUNNER_TEMP/taskdef-current.json"
+
+      - name: Render task definition
+        id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@8d79160660ad39c402a16e5fc7cd2a32e8f7d6b7 # v1.9.1
+        with:
+          task-definition: ${{ runner.temp }}/taskdef-current.json
+          container-name: ${{ env.CONTAINER }}
+          image: ${{ steps.image.outputs.uri }}
+
+      - name: Deploy (wait for service stability)
+        id: deploy
+        uses: aws-actions/amazon-ecs-deploy-task-definition@a00d4d57ac0de1a99b39fe469f3d898d38717c2b # v2.6.4
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          cluster: ${{ env.CLUSTER }}
+          service: ${{ env.SERVICE }}
+          wait-for-service-stability: true
+          wait-for-minutes: 10
+          wait-max-delay-seconds: 15
+
+      # services-stable also succeeds after a circuit-breaker rollback (the old revision is stable),
+      # so check which revision actually won.
+      - name: Verify rollout
+        id: verify
+        env:
+          NEW_ARN: ${{ steps.deploy.outputs.task-definition-arn }}
+        run: |
+          read -r td state running desired <<< "$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query "services[0].deployments[?status=='PRIMARY'] | [0].[taskDefinition, rolloutState, runningCount, desiredCount]" \
+            --output text)"
+          echo "Primary deployment: $td ($state, $running/$desired running)"
+          if [ "$td" != "$NEW_ARN" ]; then
+            echo "::error::The service runs $td, not the new revision $NEW_ARN (circuit breaker rolled back?)."
+            exit 1
+          fi
+          if [ "$state" != COMPLETED ] || [ "$running" != "$desired" ]; then
+            echo "::error::Rollout not completed: state $state, $running/$desired tasks running."
+            exit 1
+          fi
+
+      - name: Smoke test (${{ inputs.smoke-url }})
+        id: smoke
+        run: sh scripts/smoke.sh "$SMOKE_URL"
+
+      - name: Roll back to the previous revision
+        id: rollback
+        if: >-
+          failure() && steps.current.outputs.arn != '' &&
+          (steps.deploy.outcome == 'failure' || steps.verify.outcome == 'failure' || steps.smoke.outcome == 'failure')
+        env:
+          PREVIOUS_ARN: ${{ steps.current.outputs.arn }}
+          NEW_ARN: ${{ steps.deploy.outputs.task-definition-arn }}
+        run: |
+          echo "::warning::Rolling $CLUSTER/$SERVICE back to $PREVIOUS_ARN"
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$PREVIOUS_ARN" --query 'service.taskDefinition' --output text
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+          td=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query "services[0].deployments[?status=='PRIMARY'] | [0].taskDefinition" --output text)
+          echo "Service now runs $td"
+          [ "$td" = "$PREVIOUS_ARN" ]
+          # Keep the family clean: the failed revision must never be picked up again.
+          if [ -n "$NEW_ARN" ] && [ "$NEW_ARN" != "$PREVIOUS_ARN" ]; then
+            aws ecs deregister-task-definition --task-definition "$NEW_ARN" \
+              --query 'taskDefinition.[taskDefinitionArn, status]' --output text
+          fi
+
+      - name: Job summary
+        if: always()
+        env:
+          IMAGE: ${{ steps.image.outputs.uri }}
+          REUSED: ${{ steps.image.outputs.exists }}
+          PREVIOUS_ARN: ${{ steps.current.outputs.arn }}
+          NEW_ARN: ${{ steps.deploy.outputs.task-definition-arn }}
+          DEPLOY: ${{ steps.deploy.outcome }}
+          VERIFY: ${{ steps.verify.outcome }}
+          SMOKE: ${{ steps.smoke.outcome }}
+          ROLLBACK: ${{ steps.rollback.outcome }}
+        run: |
+          {
+            echo "## Deploy: \`$ENV_NAME\`"
+            echo
+            echo "| Item | Value |"
+            echo "|---|---|"
+            echo "| Commit | \`$SHA\` |"
+            echo "| Image | \`${IMAGE:-n/a}\`${REUSED:+ (already in ECR: $REUSED)} |"
+            echo "| Previous revision | \`${PREVIOUS_ARN##*/}\` |"
+            echo "| New revision | \`${NEW_ARN##*/}\` |"
+            echo "| Deploy / verify / smoke | $DEPLOY / $VERIFY / $SMOKE |"
+            echo "| Rollback | ${ROLLBACK:-n/a} |"
+          } >> "$GITHUB_STEP_SUMMARY"

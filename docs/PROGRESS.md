@@ -16,7 +16,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 9: Observability module + prod env (dev plan 111 / 0 / 0, prod plan 118 / 0 / 0, fmt + validate OK, tflint 0 on all 9 dirs, checkov all of `infra/` 337/0/43, observability 30/0/3, evidence in `evidence/04-iac-scan.txt`, not applied)
 - [x] Task 10: First dev deploy (109 added, no drift after T-013 fix, Cloudflare done by the user, live smoke 22/22 via `https://test.name.vn`, direct ALB access times out, no header → ALB 403, 2 tasks HEALTHY in 2 AZs, evidence in `evidence/07-smoke.txt`; open risk B-4)
 - [x] Task 11: CI pipeline (pushed `d71672a`, run 40803339770 green: app, container, iac, secrets pass; plan skipped until B-1 is resolved)
-- [ ] Task 12: CD pipeline (blocked by B-1)
+- [ ] Task 12: CD pipeline (workflows written, actionlint 0, deploy-role permissions simulated OK, committed locally; live test pending push approval and B-1)
 - [ ] Task 13: Load test and SLOs
 - [ ] Task 14: Autoscaling verification
 - [ ] Task 15: Rollback drill
@@ -226,6 +226,20 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | Plan jobs | Skipped as designed: `AWS_PLAN_ROLE_ARN` is unset because the OIDC provider doesn't exist yet (B-1). A skipped matrix job is shown unexpanded as `plan (${{ matrix.env }})`, since GitHub evaluates the job `if` before expanding the matrix |
 | Still to verify | The plan jobs and their job summaries (expected dev `No changes.`, prod 118 to add), once the admin creates the OIDC provider and `AWS_PLAN_ROLE_ARN` and `ALERT_EMAIL` are set (RUNBOOK checklist steps 1, 3, 4) |
 | Origin secret | Not rotated (user decision, B-4). `TF_DEV_ORIGIN_SECRET_VERSION` stays `2` |
+
+## CD pipeline (Task 12)
+
+| Item | Result |
+|---|---|
+| Workflows | `.github/workflows/cd.yml` (`workflow_run` of CI, completed, branch `main`) calls the reusable `.github/workflows/deploy-ecs.yml` for `dev`, then `prod` (`needs: dev`, `if: vars.PROD_ENABLED == 'true'`, prod environment reviewer) |
+| Gates | `vars.CD_ENABLED == 'true'`, CI conclusion `success`, CI event `push`, head branch `main`, head repository = this repository. `CD_ENABLED` stays unset until B-1, so CD shows as skipped instead of failing on OIDC |
+| Deploy job | `ubuntu-24.04-arm`, `environment: <env>` (sub `repo:datng17/ecs-portfolio:environment:<env>`), role from the environment variable `AWS_DEPLOY_ROLE_ARN`. Steps: preflight → OIDC → ECR login → build arm64 `:<sha>` (skipped if the immutable tag exists) → Trivy HIGH/CRITICAL gate → push → describe the service's current revision with tags → render → deploy + wait for stability → verify PRIMARY is the new revision and `COMPLETED` → `scripts/smoke.sh https://test.name.vn` → on failure roll back to the previous revision and deregister the new one → job summary |
+| Pinning | New: aws-actions/amazon-ecr-login v2.1.7 `03f1aad`, amazon-ecs-render-task-definition v1.9.1 `8d79160`, amazon-ecs-deploy-task-definition v2.6.4 `a00d4d5` (full SHAs in the file, peeled tags from `git ls-remote`). Reused from CI: checkout v7.0.1, configure-aws-credentials v6.3.0, Trivy 0.76.1 digest |
+| Permissions / concurrency | Workflow `contents: read`; deploy job `contents: read` + `id-token: write`. Group `deploy-<env>`, `cancel-in-progress: false` |
+| actionlint | 1.7.12 (Docker, with shellcheck) over all workflows: 0 findings |
+| IAM check | `iam simulate-principal-policy` on `portfolio-gha-deploy-dev` (region context ap-southeast-2): all 16 action/resource pairs the workflow uses are `allowed`, including `ecs:TagResource` with `ecs:CreateAction = RegisterTaskDefinition` and `iam:PassRole` with `iam:PassedToService = ecs-tasks.amazonaws.com`. `UpdateService` on the prod service: `implicitDeny` (as intended). **No IAM gaps**; no Terraform change. Raw: `evidence/raw/iam-sim-cd-task12.txt` (gitignored) |
+| Read-only dry run | The workflow's CLI queries against dev: service `ACTIVE`, revision `portfolio-dev-app:1`; PRIMARY `COMPLETED` 2/2; the render input (task definition + tags) has family, 256/512, ARM64, image `:98e5ce1…`, tags Project/Owner/ManagedBy/CostCenter/Env/Name |
+| Live test | **Pending.** Needs (1) the OIDC provider (B-1), (2) the `dev` environment with `AWS_DEPLOY_ROLE_ARN` and repository variable `CD_ENABLED = true`, (3) a push approved by the user (R9). Procedure: `docs/RUNBOOK.md`, "CD pipeline", "Live verification" |
 
 ## Skills note
 

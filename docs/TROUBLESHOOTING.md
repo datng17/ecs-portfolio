@@ -188,3 +188,17 @@ Each entry: **Symptom → Root cause → Fix → Prevention**.
 - **Prevention:** `scripts/smoke.sh` and `scripts/smoke.ps1` now fail if `GET /` returns an
   `X-Origin-Verify` header (presence only, the value is never printed). `docs/CLOUDFLARE.md` step 3 has a
   warning on the rule type and how to check it with `curl -I`.
+
+## T-015: `iam simulate-principal-policy` returned `explicitDeny` for allowed deploy actions (Task 12)
+
+- **Symptom:** simulating `portfolio-gha-deploy-dev` for `ecr:GetAuthorizationToken`,
+  `ecs:RegisterTaskDefinition` and the other `Resource "*"` actions returned `explicitDeny`, although the
+  role's inline policy allows them.
+- **Root cause:** the simulation includes the organization's region SCP, which denies requests outside
+  ap-southeast-2. Without a request context the simulator has no `aws:RequestedRegion`, so the SCP deny
+  matched. (A second attempt in the shell printed nothing: the helper function assigned to `$args`, which is
+  an automatic variable in PowerShell.)
+- **Fix:** pass `--context-entries ContextKeyName=aws:RequestedRegion,ContextKeyValues=ap-southeast-2,ContextKeyType=string`
+  and name the argument array something other than `$args`. All 16 action/resource pairs were then `allowed`.
+- **Prevention:** in this account always add the `aws:RequestedRegion` context when simulating, and never
+  use `$args`/`$input` as variable names in pwsh helpers.

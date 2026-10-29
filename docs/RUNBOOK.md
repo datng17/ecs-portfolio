@@ -58,6 +58,8 @@ local evidence). The workflow token is read-only (`contents: read`); only the pl
    - `prod`: deployment branches limited to `main`, required reviewer (yourself), variable
      `AWS_DEPLOY_ROLE_ARN` = `arn:aws:iam::681990781993:role/portfolio-gha-deploy-prod`. Repository variable
      `PROD_ENABLED` stays unset (prod is never deployed, R2).
+   - Repository variable `CD_ENABLED` = `true` turns CD on. Set it only after step 1 and the `dev`
+     environment exist; until then the CD jobs show as skipped (see "CD pipeline" below).
 6. **Branch protection** for `main` (after the first green run, so the check names exist): require the status
    checks `app (lint, test, build)`, `container (arm64)`, `iac (fmt, tflint, checkov, validate, test)`,
    `secrets (gitleaks)`. Don't require the plan checks, since they're skipped on pull requests.
@@ -77,3 +79,81 @@ local evidence). The workflow token is read-only (`contents: read`); only the pl
 | Dev plan replaces `module.alb.random_password.origin_secret` | `TF_DEV_ORIGIN_SECRET_VERSION` doesn't match the tfvars | Step 3. Never apply such a plan from CI (it can't: the role is read-only) |
 | tflint `Failed to install a plugin` | GitHub API rate limit or network | Re-run the job (the token is already passed) |
 | Trivy image job fails on a new HIGH CVE | Upstream base image or Alpine package | Rebuild after the upstream fix, or bump the base digest in the Dockerfile |
+
+## CD pipeline (Task 12)
+
+Workflows: `.github/workflows/cd.yml` (trigger and gates) and `.github/workflows/deploy-ecs.yml` (reusable
+deploy job, one call per environment).
+
+```
+CI (push to main) --success--> CD: dev --> CD: prod (only if PROD_ENABLED, then a required reviewer)
+```
+
+`cd.yml` runs on `workflow_run` of CI (`completed`, branch `main`). The `dev` job starts only when all of these
+hold: `vars.CD_ENABLED == 'true'`, the CI conclusion is `success`, the CI event was `push` (not a PR), the head
+branch is `main`, and the head repository is this repository. It deploys `workflow_run.head_sha`, the commit
+CI tested.
+
+Steps in `deploy (<env>)` (runner `ubuntu-24.04-arm`, `environment: <env>`, OIDC sub
+`repo:datng17/ecs-portfolio:environment:<env>`, role from the environment variable `AWS_DEPLOY_ROLE_ARN`):
+
+| Step | What it does |
+|---|---|
+| Preflight | Fails if `AWS_DEPLOY_ROLE_ARN` is unset or the SHA isn't 40 hex characters |
+| OIDC + ECR login | `configure-aws-credentials` v6.3.0, `amazon-ecr-login` v2.1.7 |
+| Image | `portfolio-<env>-app:<sha>`. If the tag is already in ECR (re-run; tags are immutable) the build is skipped. Otherwise native arm64 build (`--provenance=false --sbom=false`, single manifest), Trivy HIGH/CRITICAL gate (same digest as CI), push |
+| Current task definition | The revision the service runs now (`describe-services`), with its tags (`--include TAGS`), so CD revisions keep the Terraform `default_tags`. Not the newest revision in the family, which may be a failed one |
+| Render | `amazon-ecs-render-task-definition` v1.9.1: only the `app` image changes |
+| Deploy | `amazon-ecs-deploy-task-definition` v2.6.4: register, `UpdateService`, wait for stability (10 min max, 15 s polling) |
+| Verify rollout | The PRIMARY deployment must be the new revision, `rolloutState` `COMPLETED`, running = desired. Needed because the stability wait also succeeds after a circuit-breaker rollback |
+| Smoke test | `sh scripts/smoke.sh https://test.name.vn` (22 checks, through Cloudflare) |
+| Roll back | On failure of deploy, verify or smoke: `update-service` to the previous revision, `wait services-stable`, check the PRIMARY deployment, deregister the failed revision. The job still ends red |
+| Job summary | Commit, image, previous and new revision, step outcomes, rollback outcome |
+
+Concurrency group `deploy-<env>` with `cancel-in-progress: false`: a second push waits for the running
+rollout instead of cancelling it halfway. All actions are pinned to full commit SHAs. Workflow token
+`contents: read`; the deploy job adds `id-token: write`.
+
+### Variables
+
+| Where | Name | Value |
+|---|---|---|
+| Repository variable | `CD_ENABLED` | `true` once the OIDC provider exists (B-1) and the `dev` environment is set up. Unset = CD skipped |
+| Repository variable | `PROD_ENABLED` | leave unset (R2). Even when `true`, the prod environment's required reviewer must approve |
+| Environment `dev` variable | `AWS_DEPLOY_ROLE_ARN` | `arn:aws:iam::681990781993:role/portfolio-gha-deploy-dev` |
+| Environment `prod` variable | `AWS_DEPLOY_ROLE_ARN` | `arn:aws:iam::681990781993:role/portfolio-gha-deploy-prod` |
+
+No secrets are needed: the task definition holds no secret values (the origin secret is ALB-side only).
+
+### IAM coverage (checked with `iam simulate-principal-policy`, Task 12)
+
+`portfolio-gha-deploy-dev` allows every call the workflow makes: `ecr:GetAuthorizationToken`,
+`ecr:DescribeImages` and the push actions on `portfolio-dev-app`, `ecs:Describe/Register/DeregisterTaskDefinition`,
+`ecs:TagResource` on `task-definition/portfolio-dev-*` only with `ecs:CreateAction = RegisterTaskDefinition`,
+`ecs:DescribeServices`/`UpdateService` on `service/portfolio-dev-cluster/*`, and `iam:PassRole` on the dev
+execution and task roles with `iam:PassedToService = ecs-tasks.amazonaws.com`. `UpdateService` on the prod
+service is denied, as intended. `ecs:ListTagsForResource` isn't granted and isn't needed. If
+`describe-task-definition --include TAGS` is ever refused, the step falls back to no tags and logs a warning.
+
+### Live verification (after B-1)
+
+1. Set `CD_ENABLED = true`, the `dev` environment and its `AWS_DEPLOY_ROLE_ARN`.
+2. Commit a visible content change (for example a project description in `src/components/Project.tsx`; not
+   the `Dat Nguyen` heading or the `DevOps` subtitle, which the unit tests and `smoke.sh` check) and push to
+   `main` (needs approval, R9).
+3. Actions: CI run → CD run (`dev` → `deploy (dev)`; `prod` skipped). The deploy job summary shows the new
+   revision (`portfolio-dev-app:2` for the first CD deploy).
+4. `https://test.name.vn` shows the change. Target: live within about 5 minutes of the CD job starting.
+5. `aws ecs describe-services --cluster portfolio-dev-cluster --services portfolio-dev-app --region ap-southeast-2 --query 'services[0].taskDefinition'` returns the new revision.
+
+### CD troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| CD run shows `dev` skipped | `CD_ENABLED` unset, CI not green, or CI ran for a PR | Expected until B-1; otherwise fix CI |
+| `Environment variable AWS_DEPLOY_ROLE_ARN is not set` | Variable set on the repository instead of the `dev` environment | Move it to the environment |
+| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The `sub` doesn't match `environment:dev` (job without `environment:`), or the OIDC provider is missing | Check the environment name; B-1 |
+| `tag invalid: The image tag ... already exists` | Should not happen: the existing-tag check skips the push | Check the `Image tag` step output |
+| `Verify rollout` fails with "circuit breaker rolled back?" | New tasks failed health checks; ECS rolled back on its own | Read ECS service events and `/ecs/portfolio-dev` logs. The rollback step re-pins the previous revision and deregisters the new one |
+| Smoke test fails with 403 or a Cloudflare challenge page | Cloudflare security settings (Bot Fight Mode, WAF) challenge GitHub runner IPs | Allow the `portfolio-smoke/1.0` user agent with a WAF skip rule, or relax Bot Fight Mode |
+| Terraform plan shows the task definition as changed after CD | Shouldn't: the service has `ignore_changes = [task_definition]`, and the Terraform-owned revision stays registered | Keep `TF_DEV_IMAGE_TAG` at the Terraform value |
