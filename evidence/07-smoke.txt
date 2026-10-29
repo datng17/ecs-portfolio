@@ -1,0 +1,104 @@
+# Task 10 live verification: smoke test, origin protection, task placement
+# Date: 2026-10-29, 01:36-01:40 UTC (08:36-08:40 +07:00). Region ap-southeast-2. Site https://test.name.vn (Cloudflare proxied).
+# Redacted: the origin secret and the alert email appear nowhere in this file. Header values of
+# X-Origin-Verify are never printed, only the header name and the number of values.
+
+## 1. Live smoke test (scripts/smoke.sh in a container, script streamed on stdin, T-006/T-007)
+
+$ docker version --format "{{.Server.Version}}"     # engine was stopped; `docker desktop start` first
+29.9.1
+$ cmd /c "docker run --rm -i curlimages/curl:latest sh -s -- https://test.name.vn < scripts\smoke.sh"
+Smoke test against https://test.name.vn
+PASS  GET /healthz -> 200 "ok"
+PASS  GET / -> 200
+PASS  GET / is text/html
+PASS  GET / contains 'Dat Nguyen'
+PASS  GET / Cache-Control: no-cache
+PASS  Server header hides nginx version
+PASS  No inline <script> blocks
+PASS  GET / has no X-Origin-Verify header
+PASS  Header content-security-policy
+PASS  Header strict-transport-security
+PASS  Header x-content-type-options
+PASS  Header x-frame-options
+PASS  Header referrer-policy
+PASS  Header permissions-policy
+PASS  index.html references /static/js/main.<hash>.js
+PASS  GET /static/js/main.6ae17e2a.js -> 200
+PASS  Static Cache-Control immutable
+PASS  Static Content-Encoding gzip
+PASS  Static keeps security headers
+PASS  SPA fallback /some/client/route -> 200 HTML
+PASS  Missing static asset -> 404
+PASS  Dotfile /.env -> 404
+RESULT: PASS
+exit 0  => 22/22 PASS
+
+Notes:
+- "GET / has no X-Origin-Verify header" is new in this task (T-014). The run before it was added passed 21/21.
+- No check needed an edge-aware change: through Cloudflare, Cache-Control (no-cache / immutable), gzip for
+  `Accept-Encoding: gzip`, and all security headers reach the client unchanged. Server is "cloudflare" (no digits).
+- Same run on the host: `pwsh -File scripts/smoke.ps1 -BaseUrl https://test.name.vn` -> 22/22 PASS, exit 0.
+- Local regression: `docker compose up -d` (ReadonlyRootfs=true), then smoke.sh on portfolio_default against
+  http://web:8080 -> 22/22 PASS, exit 0. Compose stopped afterwards.
+
+## 2. Origin protection
+
+### 2a. Direct to the ALB from this machine (not a Cloudflare IP), 2026-10-29 01:38:22 UTC
+$ curl.exe -sk --max-time 10 -o NUL -w "%{http_code}" https://portfolio-dev-alb-1560386417.ap-southeast-2.elb.amazonaws.com/
+https -> http_code 000, curl exit 28 (timeout after 10 s)
+$ curl.exe -s  --max-time 10 -o NUL -w "%{http_code}" http://portfolio-dev-alb-1560386417.ap-southeast-2.elb.amazonaws.com/
+http  -> http_code 000, curl exit 28 (timeout after 10 s)
+=> The ALB security group admits only Cloudflare IPv4 ranges on 80/443 and drops everything else.
+
+### 2b. No header -> 403 (ALB listener config)
+$ aws elbv2 describe-listeners --load-balancer-arn <portfolio-dev-alb> --query 'Listeners[].[Port,Protocol,SslPolicy,DefaultActions[0].Type]'
+443  HTTPS  ELBSecurityPolicy-TLS13-1-2-Res-2021-06  fixed-response
+80   HTTP   None                                     redirect
+$ aws elbv2 describe-rules --listener-arn <443 listener> --query 'Rules[].[Priority, Conditions[].Field, Conditions[].HttpHeaderConfig.HttpHeaderName,
+    length(Conditions[0].HttpHeaderConfig.Values), Actions[0].Type, FixedResponseConfig.{StatusCode,ContentType,MessageBody}, TargetGroupArn]'
+priority  condition    header           #values  action          fixed-response
+100       http-header  X-Origin-Verify  1        forward         -> targetgroup/portfolio-dev-tg/10aa8658d68e6bed
+default   (none)       -                0        fixed-response  403 text/plain "Forbidden" (9 bytes)
+
+### 2b'. No header -> 403, observed through Cloudflare (ALB access logs, s3://portfolio-dev-alb-logs-681990781993-ap-southeast-2/alb/..., 2026-10-29)
+Before the Cloudflare Request Header Transform Rule existed (T-014), requests reached the ALB without the
+header and got the default action. Every one was answered by the ALB itself (no target):
+  00:41:39 - 01:26:13 UTC  9 requests  elb_status 403  target "-"  actions_executed "fixed-response"  matched_rule_priority 0 (default)
+  01:31:39 - 01:34:00 UTC 12 requests  elb_status 200  targets 10.10.135.204:8080 / 10.10.158.45:8080  actions "forward"  rule 100
+The client saw 403, Content-Type text/plain, body "Forbidden" (9 bytes) during 00:41-01:23 UTC, which is the
+ALB fixed-response signature (nginx would send text/html with its own error page).
+
+### 2c. Through Cloudflare, 2026-10-29 ~01:39 UTC
+$ curl.exe -sS -I https://test.name.vn/          (headers filtered; x-origin-verify only counted)
+  HTTP/1.1 200 OK
+  Content-Type: text/html
+  Server: cloudflare
+  cf-cache-status: DYNAMIC
+  CF-RAY: a51e76b47e4b1ccb-SIN
+  x-origin-verify headers: 0
+$ curl.exe -sS -I https://test.name.vn/healthz
+  HTTP/1.1 200 OK
+  Content-Type: text/plain
+  Server: cloudflare
+  cf-cache-status: DYNAMIC
+  CF-RAY: a51e76b969b15880-SIN
+  x-origin-verify headers: 0
+
+## 3. Tasks in 2 AZs
+$ aws ecs describe-services --cluster portfolio-dev-cluster --services portfolio-dev-app --query '[status,desiredCount,runningCount,pendingCount,length(deployments)]'
+ACTIVE  desired 2  running 2  pending 0  deployments 1
+$ aws ecs list-tasks --cluster portfolio-dev-cluster --service-name portfolio-dev-app ; aws ecs describe-tasks ...
+task 537c84b2e5e24683a18a6d9231bc31c2  ap-southeast-2b  RUNNING  HEALTHY  arm64  portfolio-dev-app:1
+task e6e2eb56363f4bceaa75bdcc39884bb0  ap-southeast-2a  RUNNING  HEALTHY  arm64  portfolio-dev-app:1
+=> 2 RUNNING / HEALTHY tasks in 2 different AZs
+$ aws elbv2 describe-target-health --target-group-arn <portfolio-dev-tg>
+10.10.135.204  8080  ap-southeast-2a  healthy
+10.10.158.45   8080  ap-southeast-2b  healthy
+=> 2/2 targets healthy
+
+## 4. Secret hygiene
+The origin secret (SSM version 2, 48 chars) was read from SSM in-process and compared against this file and
+every other file in the commit; only booleans were printed. The alert email was checked the same way.
+evidence/07-smoke.txt, docs/{TROUBLESHOOTING,CLOUDFLARE,PROGRESS}.md, scripts/smoke.{sh,ps1}:
+secret present=False, email present=False

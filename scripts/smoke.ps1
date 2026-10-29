@@ -5,7 +5,8 @@
 
 .DESCRIPTION
   Checks health, the HTML shell, security headers, cache headers, gzip, the
-  SPA fallback and static 404s. Exits 1 if any check fails.
+  SPA fallback and static 404s, and that the X-Origin-Verify header never
+  reaches the client. Exits 1 if any check fails.
 
 .EXAMPLE
   ./scripts/smoke.ps1
@@ -87,6 +88,8 @@ Assert-That "GET / contains '$ExpectText'" ($root.Body -like "*$ExpectText*")
 Assert-That 'GET / Cache-Control: no-cache' ((Get-Header $root 'cache-control') -eq 'no-cache') "(got '$(Get-Header $root 'cache-control')')"
 Assert-That 'Server header hides nginx version' ((Get-Header $root 'server') -notmatch '\d') "(got '$(Get-Header $root 'server')')"
 Assert-That 'No inline <script> blocks (CSP script-src self)' ($root.Body -notmatch '<script>[^<]')
+# The origin secret must never reach the visitor (T-014). Only the presence is checked; the value is never printed.
+Assert-That 'GET / has no X-Origin-Verify header' (-not $root.Headers.ContainsKey('x-origin-verify'))
 
 # 3. Security headers.
 $required = @{

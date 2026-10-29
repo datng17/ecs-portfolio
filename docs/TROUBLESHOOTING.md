@@ -163,3 +163,27 @@ Each entry: **Symptom → Root cause → Fix → Prevention**.
 - **Prevention:** run `terraform plan -detailed-exitcode` right after every first apply. When writing
   `container_definitions`, declare the fields ECS fills with defaults (`environment`, `mountPoints`,
   `portMappings`, `volumesFrom`, `systemControls`, `capabilities.add`) explicitly.
+
+## T-014: Cloudflare origin header created as a Response Header Transform Rule (Task 10)
+
+- **Symptom:** every request to `https://test.name.vn` through Cloudflare returned `403`, `text/plain`,
+  body `Forbidden` (9 bytes), and the response to the visitor carried an `X-Origin-Verify` header. The ALB
+  access logs show these requests as `elb_status_code 403`, target `-`, `actions_executed fixed-response`,
+  matched rule `0` (the default action), from 00:41 to 01:26 UTC on 2026-10-29.
+- **Root cause:** the `portfolio-origin-verify` rule was created as a **Response** Header Transform Rule. A
+  response rule adds the header to Cloudflare's reply to the visitor, so the ALB never received it (default
+  action 403) and the secret was published to anyone who opened the site. It happened twice: after the first
+  occurrence the secret was rotated (SSM version 1 -> 2, `origin_secret_version = "2"`), and the rule for the
+  version 2 value was also created response-side for a while.
+- **Fix:** the user deleted the response rules and created a **Request** Header Transform Rule with the same
+  name, filter and header. The ALB then matched rule 100 and forwarded (first forwarded 200 at 01:31:39 UTC).
+  The live smoke test passes 22/22 and the response has no `X-Origin-Verify` (`evidence/07-smoke.txt`).
+- **Status / OPEN RISK (PROGRESS.md B-4):** the current secret (SSM version 2) was publicly exposed while the
+  response rule was active. The user chose to skip rotation for now. Anyone who saw it can reach the
+  origin only from a Cloudflare IP (the security group still drops other sources), but they could do so
+  through their own Cloudflare zone. **Rotate before Task 11 or any public sharing:** set
+  `origin_secret_version = "3"` in the gitignored `infra/envs/dev/terraform.tfvars`, apply, then edit the
+  value of the existing Request rule right away.
+- **Prevention:** `scripts/smoke.sh` and `scripts/smoke.ps1` now fail if `GET /` returns an
+  `X-Origin-Verify` header (presence only, the value is never printed). `docs/CLOUDFLARE.md` step 3 has a
+  warning on the rule type and how to check it with `curl -I`.

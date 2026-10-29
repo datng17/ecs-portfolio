@@ -14,7 +14,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 7: ALB module (plan 84 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov alb 53/0/8, infra minus bootstrap 217/0/16, not applied)
 - [x] Task 8: ECS module (terraform test 11/11 pass, plan 98 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov ecs 35/0/4, infra minus bootstrap 252/0/20, Dockerfile gains `VOLUME`, not applied)
 - [x] Task 9: Observability module + prod env (dev plan 111 / 0 / 0, prod plan 118 / 0 / 0, fmt + validate OK, tflint 0 on all 9 dirs, checkov all of `infra/` 337/0/43, observability 30/0/3, evidence in `evidence/04-iac-scan.txt`, not applied)
-- [ ] Task 10: First dev deploy 🛑 apply; Cloudflare steps done by the user
+- [x] Task 10: First dev deploy (109 added, no drift after T-013 fix, Cloudflare done by the user, live smoke 22/22 via `https://test.name.vn`, direct ALB access times out, no header → ALB 403, 2 tasks HEALTHY in 2 AZs, evidence in `evidence/07-smoke.txt`; open risk B-4)
 - [ ] Task 11: CI pipeline 🛑 GitHub push (blocked by B-1)
 - [ ] Task 12: CD pipeline (blocked by B-1)
 - [ ] Task 13: Load test and SLOs
@@ -200,7 +200,14 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | Alarms | All 6 `portfolio-dev-*` alarms `OK` |
 | Secret hygiene | The alert email and the origin secret don't appear in `evidence/05-terraform.txt` or the raw apply/plan/check files (checked by string match) |
 | Raw output | `evidence/raw/apply-dev-task10.txt`, `plan-dev-postapply-task10.txt`, `plan-dev-postapply2-task10.txt`, `postapply-checks-task10.txt` (gitignored) |
-| Still open | Cloudflare steps (`docs/CLOUDFLARE.md`, user), then the smoke test through `https://test.name.vn` (`evidence/07-smoke.txt`) and the "no header → 403 via Cloudflare" check |
+| Cloudflare | Done by the user: `@` CNAME → ALB (proxied), Full (strict), Request Header Transform Rule `portfolio-origin-verify`. The rule was first created response-side twice, which leaked the secret; the secret was rotated once (SSM version 1 → 2). See T-014 and B-4 |
+| Smoke (live) | 2026-10-29 01:36 UTC, `smoke.sh` in `curlimages/curl` → `https://test.name.vn`: **22/22 PASS**, exit 0. `smoke.ps1` from the host: 22/22. No check needed an edge-aware change (Cloudflare passes Cache-Control, gzip and the security headers through; `Server: cloudflare`) |
+| New smoke check | `GET / has no X-Origin-Verify header` in `smoke.sh` and `smoke.ps1` (presence only). Local read-only compose container: 22/22 PASS |
+| Through Cloudflare | `/` and `/healthz` → 200 with `CF-RAY`, `cf-cache-status: DYNAMIC`, 0 `X-Origin-Verify` headers |
+| Direct to ALB (re-check) | 2026-10-29 01:38 UTC: `https://` and `http://<alb_dns_name>/` → `000`, curl exit 28. Security group drops non-Cloudflare sources |
+| No header → 403 | Listener: default fixed-response 403 `text/plain` `Forbidden`; rule 100 `http-header X-Origin-Verify` (1 value) → forward. ALB access logs: 9 requests 00:41–01:26 UTC with `elb_status 403`, target `-`, `fixed-response`, rule 0 (before the Request rule existed); from 01:31:39 UTC forwarded by rule 100 with 200 |
+| Tasks / targets (re-check) | `537c84b2…` ap-southeast-2b and `e6e2eb56…` ap-southeast-2a, both RUNNING / HEALTHY, revision 1. Targets 10.10.135.204 (2a) and 10.10.158.45 (2b) healthy |
+| Evidence | `evidence/07-smoke.txt` (redacted; secret and alert email checked absent by in-process match). Raw: `evidence/raw/smoke-live-task10.txt`, `smoke-live-ps1-task10.txt`, `smoke-local-task10.txt` (gitignored) |
 
 ## Skills note
 
@@ -241,6 +248,16 @@ The agent can't write this file. Changes:
 - `aws-pricing`: keep `us-east-1` (the Pricing API endpoint isn't regional).
 
 Until then, MCP calls must pass the region explicitly, or use the AWS CLI with `--region ap-southeast-2`.
+
+### B-4: Origin secret version 2 was publicly exposed (open risk, rotation deferred by the user)
+
+During Task 10 the Cloudflare rule was created as a Response Header Transform Rule, so `X-Origin-Verify`
+was sent to visitors (T-014). The current secret (SSM `/portfolio-dev/alb/origin-verify-secret`, version 2)
+was exposed while that rule was active. The security group still limits the ALB to Cloudflare IPs, but
+someone with the value could reach the origin through their own Cloudflare zone and bypass this zone's
+settings. **The user chose to skip rotation for now. Rotate before Task 11 or any public sharing:** set
+`origin_secret_version = "3"` in `infra/envs/dev/terraform.tfvars`, apply, then update the Request rule
+value (`docs/CLOUDFLARE.md`, "Rotating the secret").
 
 ### B-3: Cost allocation tags need the payer account (affects Task 9)
 

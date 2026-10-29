@@ -58,6 +58,8 @@ check "GET / contains '$EXPECT_TEXT'" grep -q "$EXPECT_TEXT" "$TMP/b"
 check 'GET / Cache-Control: no-cache' [ "$(header cache-control)" = no-cache ]
 check 'Server header hides nginx version' sh -c "! echo '$(header server)' | grep -q '[0-9]'"
 check 'No inline <script> blocks'    sh -c "! grep -q '<script>[^<]' '$TMP/b'"
+# The origin secret must never reach the visitor (T-014). Only the presence is checked; the value is never printed.
+check 'GET / has no X-Origin-Verify header' sh -c "! grep -qi '^x-origin-verify:' '$TMP/h'"
 
 # 3. Security headers.
 check 'Header content-security-policy'   sh -c "echo \"\$0\" | grep -q \"default-src 'self'\"" "$(header content-security-policy)"

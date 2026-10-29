@@ -40,7 +40,18 @@ CNAME), edit it instead of adding a second one.
 
 ## 3. Transform Rule: origin header
 
-**Rules → Transform Rules → Modify Request Header → Create rule:**
+> **⚠ Warning: this must be a _Request_ Header Transform Rule, never a _Response_ Header Transform Rule.**
+> A response rule sends the header to every visitor. The ALB never sees it (every request gets `403
+> Forbidden`) and the secret becomes public. This happened twice in Task 10 (TROUBLESHOOTING.md T-014).
+>
+> - Current dashboard: **Rules → Overview → Create rule → Request Header Transform Rule**.
+> - Older dashboard: **Rules → Transform Rules → Modify Request Header → Create rule**.
+>
+> **How to tell:** after deploying, run `curl -sI https://test.name.vn/`. The output must **not** contain
+> `X-Origin-Verify`. If it does, delete the rule, recreate it as a Request rule, and rotate the secret
+> (see "Rotating the secret"). `scripts/smoke.sh` fails on this as well.
+
+**Create the Request Header Transform Rule:**
 
 | Field | Value |
 |---|---|
@@ -67,7 +78,7 @@ Reply "Cloudflare done". The agent then runs the checks below and saves them to 
 ## Verification (agent)
 
 ```powershell
-# Live site through Cloudflare: 21 checks.
+# Live site through Cloudflare: 22 checks (includes "no X-Origin-Verify in the response").
 cmd /c "docker run --rm -i curlimages/curl:latest sh -s -- https://test.name.vn < scripts\smoke.sh"
 # Direct to the ALB from a non-Cloudflare IP: the security group drops it (timeout).
 curl.exe -sk --max-time 10 -o NUL -w "%{http_code}`n" https://<alb_dns_name>/
@@ -80,9 +91,12 @@ action `fixed-response 403` and the header rule at priority 100.
 
 ## Rotating the secret
 
-1. Bump `origin_secret_version` in `infra/envs/dev/terraform.tfvars` and apply. From this moment Cloudflare
-   gets 403.
-2. Read the new value (step 0) and update the Transform Rule value right away.
+1. `origin_secret_version` may be missing from your `terraform.tfvars`; then the default `"1"` from
+   `infra/envs/dev/variables.tf` applies (the dev env is at `"2"` since T-014). Add or edit the line `origin_secret_version = "N"` (the next number) in the
+   gitignored `infra/envs/dev/terraform.tfvars`, then plan and apply. From this moment Cloudflare gets 403.
+2. Read the new value (step 0) and edit the value of the existing **Request** Header Transform Rule right
+   away. Don't create a second rule.
+3. Check: `curl -sI https://test.name.vn/` returns 200 and has no `X-Origin-Verify` header.
 
 ## Teardown (Task 18)
 
