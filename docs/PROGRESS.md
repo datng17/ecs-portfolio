@@ -15,7 +15,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 8: ECS module (terraform test 11/11 pass, plan 98 to add / 0 change / 0 destroy, fmt + validate OK, tflint 0, checkov ecs 35/0/4, infra minus bootstrap 252/0/20, Dockerfile gains `VOLUME`, not applied)
 - [x] Task 9: Observability module + prod env (dev plan 111 / 0 / 0, prod plan 118 / 0 / 0, fmt + validate OK, tflint 0 on all 9 dirs, checkov all of `infra/` 337/0/43, observability 30/0/3, evidence in `evidence/04-iac-scan.txt`, not applied)
 - [x] Task 10: First dev deploy (109 added, no drift after T-013 fix, Cloudflare done by the user, live smoke 22/22 via `https://test.name.vn`, direct ALB access times out, no header → ALB 403, 2 tasks HEALTHY in 2 AZs, evidence in `evidence/07-smoke.txt`; open risk B-4)
-- [ ] Task 11: CI pipeline 🛑 GitHub push (workflow written and validated locally, committed locally; push awaits approval; plan jobs need B-1)
+- [x] Task 11: CI pipeline (pushed `d71672a`, run 40803339770 green: app, container, iac, secrets pass; plan skipped until B-1 is resolved)
 - [ ] Task 12: CD pipeline (blocked by B-1)
 - [ ] Task 13: Load test and SLOs
 - [ ] Task 14: Autoscaling verification
@@ -221,7 +221,11 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | actionlint | 1.7.12 (Docker, with shellcheck): 0 findings |
 | Local dry run of the CI commands | checkov (CI digest, read-only mount): 337 passed / 0 failed / 43 skipped. tflint (CI digest) on all 9 dirs: exit 0. gitleaks (CI digest, `--log-opts=77536ad..HEAD`, read-only mount with `safe.directory` via env): 13 commits, no leaks |
 | GitHub setup checklist | `docs/RUNBOOK.md`, "GitHub setup" |
-| Not yet verified | The CI run itself (needs the push) and the plan jobs (need B-1 and the variables) |
+| Push | `d71672a` pushed to `origin/main` on 2026-10-29 01:55 UTC (`git push -u origin main`, reflog "update by push") |
+| First CI run | [Run 40803339770](https://github.com/datng17/ecs-portfolio/actions/runs/40803339770), event `push`, conclusion **success**. `app` 51 s, `container (arm64)` 70 s, `iac` 65 s, `secrets (gitleaks)` 6 min 35 s (full history, first push), all success, 0 annotations |
+| Plan jobs | Skipped as designed: `AWS_PLAN_ROLE_ARN` is unset because the OIDC provider doesn't exist yet (B-1). A skipped matrix job is shown unexpanded as `plan (${{ matrix.env }})`, since GitHub evaluates the job `if` before expanding the matrix |
+| Still to verify | The plan jobs and their job summaries (expected dev `No changes.`, prod 118 to add), once the admin creates the OIDC provider and `AWS_PLAN_ROLE_ARN` and `ALERT_EMAIL` are set (RUNBOOK checklist steps 1, 3, 4) |
+| Origin secret | Not rotated (user decision, B-4). `TF_DEV_ORIGIN_SECRET_VERSION` stays `2` |
 
 ## Skills note
 
@@ -269,8 +273,9 @@ During Task 10 the Cloudflare rule was created as a Response Header Transform Ru
 was sent to visitors (T-014). The current secret (SSM `/portfolio-dev/alb/origin-verify-secret`, version 2)
 was exposed while that rule was active. The security group still limits the ALB to Cloudflare IPs, but
 someone with the value could reach the origin through their own Cloudflare zone and bypass this zone's
-settings. **The user chose to skip rotation for now. Rotate before Task 11 or any public sharing:** set
-`origin_secret_version = "3"` in `infra/envs/dev/terraform.tfvars`, apply, then update the Request rule
+settings. **The user chose to skip rotation in Task 10, and again before Task 11** (no apply, SSM stays at
+version 2, CI uses `TF_DEV_ORIGIN_SECRET_VERSION = 2`). **The risk remains open.** To rotate later (before any
+public sharing): set `origin_secret_version = "3"` in `infra/envs/dev/terraform.tfvars`, apply, then update the Request rule
 value (`docs/CLOUDFLARE.md`, "Rotating the secret").
 
 ### B-3: Cost allocation tags need the payer account (affects Task 9)

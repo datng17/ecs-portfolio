@@ -179,9 +179,10 @@ Each entry: **Symptom → Root cause → Fix → Prevention**.
   name, filter and header. The ALB then matched rule 100 and forwarded (first forwarded 200 at 01:31:39 UTC).
   The live smoke test passes 22/22 and the response has no `X-Origin-Verify` (`evidence/07-smoke.txt`).
 - **Status / OPEN RISK (PROGRESS.md B-4):** the current secret (SSM version 2) was publicly exposed while the
-  response rule was active. The user chose to skip rotation for now. Anyone who saw it can reach the
+  response rule was active. The user chose to skip rotation in Task 10, and again before Task 11 (CI keeps
+  `TF_DEV_ORIGIN_SECRET_VERSION = 2`). The risk remains open. Anyone who saw it can reach the
   origin only from a Cloudflare IP (the security group still drops other sources), but they could do so
-  through their own Cloudflare zone. **Rotate before Task 11 or any public sharing:** set
+  through their own Cloudflare zone. **To rotate later (before any public sharing):** set
   `origin_secret_version = "3"` in the gitignored `infra/envs/dev/terraform.tfvars`, apply, then edit the
   value of the existing Request rule right away.
 - **Prevention:** `scripts/smoke.sh` and `scripts/smoke.ps1` now fail if `GET /` returns an
