@@ -210,8 +210,9 @@ jobs:
   plan:
     name: plan (${{ matrix.env }})
     needs: [app, container, iac, secrets]
-    # The gha-plan role trusts only repo:datng17/ecs-portfolio:ref:refs/heads/main, so no PRs and no
-    # `environment:` on this job (it would change the OIDC sub claim). Skipped until AWS_PLAN_ROLE_ARN is set.
+    # The gha-plan role trusts only repo:datng17@179402133/ecs-portfolio@1435398390:ref:refs/heads/main
+    # (immutable subject claim), so no PRs and no `environment:` on this job (it would change the OIDC sub
+    # claim). Skipped until AWS_PLAN_ROLE_ARN is set.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.AWS_PLAN_ROLE_ARN != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 20

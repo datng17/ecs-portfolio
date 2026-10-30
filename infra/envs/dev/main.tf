@@ -32,6 +32,8 @@ module "iam" {
   create_github_roles        = true
   github_oidc_provider_arn   = var.github_oidc_provider_arn
   github_repository          = var.github_repository
+  github_owner_id            = var.github_owner_id
+  github_repository_id       = var.github_repository_id
   github_deploy_environments = ["dev", "prod"]
 }
 

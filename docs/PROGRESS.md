@@ -16,7 +16,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 9: Observability module + prod env (dev plan 111 / 0 / 0, prod plan 118 / 0 / 0, fmt + validate OK, tflint 0 on all 9 dirs, checkov all of `infra/` 337/0/43, observability 30/0/3, evidence in `evidence/04-iac-scan.txt`, not applied)
 - [x] Task 10: First dev deploy (109 added, no drift after T-013 fix, Cloudflare done by the user, live smoke 22/22 via `https://test.name.vn`, direct ALB access times out, no header → ALB 403, 2 tasks HEALTHY in 2 AZs, evidence in `evidence/07-smoke.txt`; open risk B-4)
 - [x] Task 11: CI pipeline (pushed `d71672a`, run 40803339770 green: app, container, iac, secrets pass; plan skipped until B-1 is resolved)
-- [ ] Task 12: CD pipeline (workflows written, actionlint 0, deploy-role permissions simulated OK, committed locally; live test pending push approval and B-1)
+- [ ] Task 12: CD pipeline (workflows written, actionlint 0, deploy-role permissions simulated OK, committed locally; B-1 resolved; OIDC trusts fixed for immutable subject claims (T-016), apply pending approval; live test pending push approval)
 - [ ] Task 13: Load test and SLOs
 - [ ] Task 14: Autoscaling verification
 - [ ] Task 15: Rollback drill
@@ -109,8 +109,8 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | ECR (`infra/modules/ecr`) | Repo `portfolio-dev-app`. `IMMUTABLE` tags, scan on push, `encryption_type = KMS` with the AWS-managed `aws/ecr` key (`kms_key_arn` variable for a CMK), `force_delete` from `ecr_force_delete` (true in dev). Lifecycle: untagged expire after 1 day, keep the 20 newest images |
 | Execution role | `portfolio-dev-ecs-execution`. Trust `ecs-tasks.amazonaws.com` with `aws:SourceAccount` + `aws:SourceArn` (ECS in this account/region). Inline policy replaces `AmazonECSTaskExecutionRolePolicy`: pull only from the env repo, logs only to `/ecs/portfolio-dev` |
 | Task role | `portfolio-dev-ecs-task`, same trust, no policies (nginx calls no AWS APIs) |
-| gha-plan | `portfolio-gha-plan`. `StringEquals` aud `sts.amazonaws.com`, sub `repo:datng17/ecs-portfolio:ref:refs/heads/main`. `ReadOnlyAccess` + inline: read state, write/delete only `envs/*/terraform.tfstate.tflock` |
-| gha-deploy-dev / -prod | `portfolio-gha-deploy-{dev,prod}`. sub `repo:datng17/ecs-portfolio:environment:{dev,prod}`. Push to `portfolio-<env>-app`, register/describe/deregister task definitions, `UpdateService`/`DescribeServices` on `service/portfolio-<env>-cluster/*`, `iam:PassRole` on the env's execution + task role only, with `iam:PassedToService = ecs-tasks.amazonaws.com` |
+| gha-plan | `portfolio-gha-plan`. `StringEquals` aud `sts.amazonaws.com`, sub `repo:datng17@179402133/ecs-portfolio@1435398390:ref:refs/heads/main` (immutable format since Task 12, T-016; originally `repo:datng17/ecs-portfolio:...`). `ReadOnlyAccess` + inline: read state, write/delete only `envs/*/terraform.tfstate.tflock` |
+| gha-deploy-dev / -prod | `portfolio-gha-deploy-{dev,prod}`. sub `repo:datng17@179402133/ecs-portfolio@1435398390:environment:{dev,prod}` (T-016). Push to `portfolio-<env>-app`, register/describe/deregister task definitions, `UpdateService`/`DescribeServices` on `service/portfolio-<env>-cluster/*`, `iam:PassRole` on the env's execution + task role only, with `iam:PassedToService = ecs-tasks.amazonaws.com` |
 | Ownership | GitHub roles are account-level, so only the dev stack creates them (`create_github_roles = true`); the prod stack (Task 9) passes `false` and creates only its ECS roles |
 | Naming contract for Task 8 | Cluster `portfolio-<env>-cluster`, log group `/ecs/portfolio-<env>`, task definition family prefix `portfolio-<env>-` (module outputs `ecs_cluster_name`, `app_log_group_name`, `task_definition_family_prefix`) |
 | OIDC provider | Not created, not read (B-1). ARN from `github_oidc_provider_arn`, default `arn:aws:iam::681990781993:oidc-provider/token.actions.githubusercontent.com` |
@@ -217,7 +217,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | Pinning | actions/checkout v7.0.1, actions/setup-node v7.1.0, hashicorp/setup-terraform v4.0.1, aws-actions/configure-aws-credentials v6.3.0, each by full SHA (resolved with `git ls-remote`, peeled tags). Scanner images by digest, same versions as the local evidence: hadolint 2.15.1, Trivy 0.76.1, tflint 0.65.0, checkov 3.3.30, gitleaks 8.30.1. Terraform 1.16.3 |
 | Permissions | Workflow `contents: read`; `id-token: write` only on the plan job. `persist-credentials: false` on every checkout |
 | Plan inputs | No tfvars in CI. Secret `ALERT_EMAIL`; repo variables `AWS_PLAN_ROLE_ARN`, `TF_DEV_IMAGE_TAG`, `TF_DEV_ORIGIN_SECRET_VERSION` (unset values fall back to the variable defaults). The email is redacted from the job summary; the binary plan is never uploaded |
-| Plan gating | Runs only on `main`, not on PRs, and only when `AWS_PLAN_ROLE_ARN` is set, so CI stays green (plan skipped) until the OIDC provider exists (B-1). Role ARN and trust confirmed with `aws iam get-role`: sub `repo:datng17/ecs-portfolio:ref:refs/heads/main`, aud `sts.amazonaws.com` |
+| Plan gating | Runs only on `main`, not on PRs, and only when `AWS_PLAN_ROLE_ARN` is set, so CI stays green (plan skipped) until the OIDC provider exists (B-1). Role ARN and trust confirmed with `aws iam get-role`: sub `repo:datng17/ecs-portfolio:ref:refs/heads/main`, aud `sts.amazonaws.com`. That sub was wrong for this repository (immutable subject claims); corrected to `repo:datng17@179402133/ecs-portfolio@1435398390:ref:refs/heads/main` in Task 12 (T-016) |
 | actionlint | 1.7.12 (Docker, with shellcheck): 0 findings |
 | Local dry run of the CI commands | checkov (CI digest, read-only mount): 337 passed / 0 failed / 43 skipped. tflint (CI digest) on all 9 dirs: exit 0. gitleaks (CI digest, `--log-opts=77536ad..HEAD`, read-only mount with `safe.directory` via env): 13 commits, no leaks |
 | GitHub setup checklist | `docs/RUNBOOK.md`, "GitHub setup" |
@@ -233,13 +233,14 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 |---|---|
 | Workflows | `.github/workflows/cd.yml` (`workflow_run` of CI, completed, branch `main`) calls the reusable `.github/workflows/deploy-ecs.yml` for `dev`, then `prod` (`needs: dev`, `if: vars.PROD_ENABLED == 'true'`, prod environment reviewer) |
 | Gates | `vars.CD_ENABLED == 'true'`, CI conclusion `success`, CI event `push`, head branch `main`, head repository = this repository. `CD_ENABLED` stays unset until B-1, so CD shows as skipped instead of failing on OIDC |
-| Deploy job | `ubuntu-24.04-arm`, `environment: <env>` (sub `repo:datng17/ecs-portfolio:environment:<env>`), role from the environment variable `AWS_DEPLOY_ROLE_ARN`. Steps: preflight → OIDC → ECR login → build arm64 `:<sha>` (skipped if the immutable tag exists) → Trivy HIGH/CRITICAL gate → push → describe the service's current revision with tags → render → deploy + wait for stability → verify PRIMARY is the new revision and `COMPLETED` → `scripts/smoke.sh https://test.name.vn` → on failure roll back to the previous revision and deregister the new one → job summary |
+| Deploy job | `ubuntu-24.04-arm`, `environment: <env>` (sub `repo:datng17@179402133/ecs-portfolio@1435398390:environment:<env>`), role from the environment variable `AWS_DEPLOY_ROLE_ARN`. Steps: preflight → OIDC → ECR login → build arm64 `:<sha>` (skipped if the immutable tag exists) → Trivy HIGH/CRITICAL gate → push → describe the service's current revision with tags → render → deploy + wait for stability → verify PRIMARY is the new revision and `COMPLETED` → `scripts/smoke.sh https://test.name.vn` → on failure roll back to the previous revision and deregister the new one → job summary |
 | Pinning | New: aws-actions/amazon-ecr-login v2.1.7 `03f1aad`, amazon-ecs-render-task-definition v1.9.1 `8d79160`, amazon-ecs-deploy-task-definition v2.6.4 `a00d4d5` (full SHAs in the file, peeled tags from `git ls-remote`). Reused from CI: checkout v7.0.1, configure-aws-credentials v6.3.0, Trivy 0.76.1 digest |
 | Permissions / concurrency | Workflow `contents: read`; deploy job `contents: read` + `id-token: write`. Group `deploy-<env>`, `cancel-in-progress: false` |
 | actionlint | 1.7.12 (Docker, with shellcheck) over all workflows: 0 findings |
 | IAM check | `iam simulate-principal-policy` on `portfolio-gha-deploy-dev` (region context ap-southeast-2): all 16 action/resource pairs the workflow uses are `allowed`, including `ecs:TagResource` with `ecs:CreateAction = RegisterTaskDefinition` and `iam:PassRole` with `iam:PassedToService = ecs-tasks.amazonaws.com`. `UpdateService` on the prod service: `implicitDeny` (as intended). **No IAM gaps**; no Terraform change. Raw: `evidence/raw/iam-sim-cd-task12.txt` (gitignored) |
 | Read-only dry run | The workflow's CLI queries against dev: service `ACTIVE`, revision `portfolio-dev-app:1`; PRIMARY `COMPLETED` 2/2; the render input (task definition + tags) has family, 256/512, ARM64, image `:98e5ce1…`, tags Project/Owner/ManagedBy/CostCenter/Env/Name |
-| Live test | **Pending.** Needs (1) the OIDC provider (B-1), (2) the `dev` environment with `AWS_DEPLOY_ROLE_ARN` and repository variable `CD_ENABLED = true`, (3) a push approved by the user (R9). Procedure: `docs/RUNBOOK.md`, "CD pipeline", "Live verification" |
+| OIDC subject fix (T-016) | After B-1 was resolved, the CI re-run of run 40803339770 failed both plan jobs with `Not authorized to perform sts:AssumeRoleWithWebIdentity`. The repository (created 2026-10-27) gets GitHub's immutable subject claims, `repo:datng17@179402133/ecs-portfolio@1435398390:...`; the trusts matched the old `repo:datng17/ecs-portfolio:...`. The IAM module now builds the sub from new variables `github_owner_id` / `github_repository_id` (digits, required when `create_github_roles`; dev defaults 179402133 / 1435398390), still exact `StringEquals`, aud unchanged. CKV_AWS_358 skipped inline on both trust documents: its repo regex rejects the `@<id>` form. Checks: fmt OK, validate OK (bootstrap/dev/prod), tflint 0 on 9 dirs, checkov 335/0/47, `terraform test` 11/11, actionlint 1.7.12 0 findings (workflow comments updated to the new sub). Dev plan: **0 to add, 3 to change, 0 to destroy**, only the `sub` in the `assume_role_policy` of `portfolio-gha-plan` and `portfolio-gha-deploy-{dev,prod}`. Apply: pending user approval (R9) |
+| Live test | **Pending.** Needs (1) the OIDC provider (B-1, done) and the T-016 trust fix applied, (2) the `dev` environment with `AWS_DEPLOY_ROLE_ARN` and repository variable `CD_ENABLED = true`, (3) a push approved by the user (R9). Procedure: `docs/RUNBOOK.md`, "CD pipeline", "Live verification" |
 
 ## Skills note
 
@@ -249,7 +250,13 @@ Terraform best practice instead.
 
 ## Open blockers / decisions
 
-### B-1: GitHub OIDC provider is blocked by SCP (decided: option 1; affects Tasks 6, 11, 12)
+### B-1: GitHub OIDC provider is blocked by SCP (RESOLVED in Task 12; affects Tasks 6, 11, 12)
+
+**Resolved (2026, Task 12):** the user had the provider created at org level:
+`arn:aws:iam::681990781993:oidc-provider/token.actions.githubusercontent.com`. `aws iam
+list-open-id-connect-providers` lists it; `iam:GetOpenIDConnectProvider` is still SCP-denied, so Terraform
+keeps taking the ARN from the variable. The first assume after that failed on the subject format (T-016),
+not on the provider.
 
 SCP `p-8v7l4082` denies creating or reading IAM OIDC providers.
 

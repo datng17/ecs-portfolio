@@ -39,3 +39,7 @@ budget_limit_usd = 30                   # Account-wide budget, owned by the dev 
 # The gha-* roles can be planned and applied, but can't be assumed until this provider exists.
 github_oidc_provider_arn = "arn:aws:iam::681990781993:oidc-provider/token.actions.githubusercontent.com"
 github_repository        = "datng17/ecs-portfolio"
+# Immutable OIDC subject claims (repositories created after 2026-07-15): the trust policies match
+# repo:<owner>@<owner_id>/<repo>@<repo_id>:... IDs from `gh api repos/<owner>/<repo>` (.owner.id, .id).
+github_owner_id      = "179402133"
+github_repository_id = "1435398390"

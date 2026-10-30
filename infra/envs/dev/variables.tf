@@ -78,6 +78,18 @@ variable "github_repository" {
   default     = "datng17/ecs-portfolio"
 }
 
+variable "github_owner_id" {
+  description = "Numeric GitHub ID of the repository owner (GitHub API .owner.id). Part of the immutable OIDC sub claim repo:<owner>@<owner_id>/<repo>@<repo_id>:..."
+  type        = string
+  default     = "179402133"
+}
+
+variable "github_repository_id" {
+  description = "Numeric GitHub ID of the repository (GitHub API .id). Part of the immutable OIDC sub claim repo:<owner>@<owner_id>/<repo>@<repo_id>:..."
+  type        = string
+  default     = "1435398390"
+}
+
 variable "certificate_domain" {
   description = "Domain of the existing ACM certificate (ap-southeast-2) used by the HTTPS listener."
   type        = string

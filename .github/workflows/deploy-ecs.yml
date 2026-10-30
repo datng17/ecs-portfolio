@@ -1,6 +1,6 @@
 # Reusable deploy job, called by cd.yml once per environment (dev, then prod when enabled).
 #
-#   OIDC (portfolio-gha-deploy-<env>, sub repo:<repo>:environment:<env>)
+#   OIDC (portfolio-gha-deploy-<env>, immutable sub repo:<owner>@<owner_id>/<repo>@<repo_id>:environment:<env>)
 #   -> build arm64 image, Trivy gate, push :<sha> to portfolio-<env>-app (tags are immutable; an existing tag is reused)
 #   -> render: the revision the service runs now (with its tags), new image only
 #   -> deploy: register + update-service, wait for stability
@@ -45,8 +45,9 @@ jobs:
     # Native arm64 build, same runner as the CI container job. AWS CLI and jq are preinstalled.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
-    # `environment:` sets the OIDC sub claim to repo:<repo>:environment:<env> (the deploy role trust) and applies
-    # the environment's protection rules (branch policy; reviewers on prod) before any AWS access.
+    # `environment:` sets the OIDC sub claim to repo:datng17@179402133/ecs-portfolio@1435398390:environment:<env>
+    # (the deploy role trust) and applies the environment's protection rules (branch policy; reviewers on prod)
+    # before any AWS access.
     environment:
       name: ${{ inputs.environment }}
       url: ${{ inputs.smoke-url }}

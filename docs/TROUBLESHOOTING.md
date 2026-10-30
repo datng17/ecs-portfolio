@@ -202,3 +202,30 @@ Each entry: **Symptom → Root cause → Fix → Prevention**.
   and name the argument array something other than `$args`. All 16 action/resource pairs were then `allowed`.
 - **Prevention:** in this account always add the `aws:RequestedRegion` context when simulating, and never
   use `$args`/`$input` as variable names in pwsh helpers.
+
+## T-016: OIDC assume denied after the provider existed: immutable subject claims (Task 12)
+
+- **Symptom:** after the org-level OIDC provider was created (B-1), the re-run of CI run 40803339770
+  (commit `d71672a`) failed `plan (dev)` and `plan (prod)` at `configure-aws-credentials` with
+  `Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity`.
+- **Root cause:** GitHub issues immutable subject claims for repositories created after 2026-07-15
+  ([GitHub docs](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims),
+  [changelog](https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/)).
+  `datng17/ecs-portfolio` was created 2026-10-27, so its tokens carry
+  `repo:datng17@179402133/ecs-portfolio@1435398390:ref:refs/heads/main` (plan) and
+  `...:environment:<env>` (deploy), with the owner ID and repository ID from the GitHub API. The trust
+  policies used `StringEquals` on the old `repo:datng17/ecs-portfolio:...` form, so they never matched.
+  The error text is the same as for any other `sub`/`aud` mismatch.
+- **Fix:** the IAM module builds the subject prefix `repo:<owner>@<owner_id>/<repo>@<repo_id>` from new
+  variables `github_owner_id` and `github_repository_id` (digits only, required when
+  `create_github_roles = true`; dev defaults 179402133 and 1435398390). Matching stays exact
+  `StringEquals`, no wildcards; the `aud` condition is unchanged. The dev plan changes only the `sub` in
+  the three `gha-*` trust policies (3 in-place updates).
+- **Side effect:** checkov CKV_AWS_358 then failed both trust documents. Its repo regex
+  (`checkov/common/util/oidc_utils.py`, `gh_repo_regex`) expects `<owner>/<repo>` and rejects
+  `<owner>@<id>/<repo>@<id>`. It's a false positive for this exact-match trust, so it's skipped inline on
+  `gha_plan_assume` and `gha_deploy_assume` with that justification (checkov 335/0/47).
+- **Prevention:** before writing an OIDC trust policy, check the repository's subject format: its
+  creation date (`gh api repos/<owner>/<repo> --jq .created_at`, after 2026-07-15 means immutable) and the
+  IDs (`--jq '.owner.id, .id'`). When in doubt, print the real claim once from a workflow (decode the
+  token's payload, never log the token itself) and compare it with `aws iam get-role`.

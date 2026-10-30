@@ -28,13 +28,17 @@ local evidence). The workflow token is read-only (`contents: read`); only the pl
 
    Until it exists, `sts:AssumeRoleWithWebIdentity` fails with `No OpenIDConnect provider found`, so leave
    `AWS_PLAN_ROLE_ARN` unset (step 3). The plan jobs then show as skipped and the rest of CI still runs.
+   **Done:** the provider exists as
+   `arn:aws:iam::681990781993:oidc-provider/token.actions.githubusercontent.com` (B-1 resolved).
 2. **Actions settings** (Settings → Actions → General):
    - Allow GitHub Actions to run.
    - Workflow permissions: **Read repository contents and packages permissions**.
    - Optional: "Require actions to be pinned to a full-length commit SHA".
 3. **Repository variables** (Settings → Secrets and variables → Actions → Variables). Repository-level,
    because the plan job must not use `environment:`: the `gha-plan` trust is
-   `repo:datng17/ecs-portfolio:ref:refs/heads/main`, and an environment changes the OIDC `sub` claim.
+   `repo:datng17@179402133/ecs-portfolio@1435398390:ref:refs/heads/main`, and an environment changes the
+   OIDC `sub` claim. The repository was created after GitHub's 2026-07-15 switch to immutable subject
+   claims, so the `sub` carries the owner ID (179402133) and repository ID (1435398390); see T-016.
 
    | Variable | Value | Why |
    |---|---|---|
@@ -52,7 +56,7 @@ local evidence). The workflow token is read-only (`contents: read`); only the pl
    No AWS keys are stored. The origin secret stays in Terraform state and SSM; CI never sees it in clear text
    (the plan prints it as sensitive) and the binary plan file is never uploaded.
 5. **Environments** (Settings → Environments), used by CD in Task 12. The deploy roles trust
-   `repo:datng17/ecs-portfolio:environment:<env>`:
+   `repo:datng17@179402133/ecs-portfolio@1435398390:environment:<env>`:
    - `dev`: deployment branches limited to `main`. Variable `AWS_DEPLOY_ROLE_ARN` =
      `arn:aws:iam::681990781993:role/portfolio-gha-deploy-dev`.
    - `prod`: deployment branches limited to `main`, required reviewer (yourself), variable
@@ -73,7 +77,7 @@ local evidence). The workflow token is read-only (`contents: read`); only the pl
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Could not assume role with OIDC: No OpenIDConnect provider found` | Provider missing (B-1) | Step 1, or unset `AWS_PLAN_ROLE_ARN` |
-| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | `sub` mismatch: run from a branch other than `main`, a PR, or a job with `environment:` | Plan only from `main` without an environment |
+| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | `sub` mismatch: run from a branch other than `main`, a PR, or a job with `environment:`; or the trust uses the old `repo:datng17/ecs-portfolio:...` format instead of the immutable `repo:datng17@179402133/ecs-portfolio@1435398390:...` (T-016) | Plan only from `main` without an environment. Check the role trust with `aws iam get-role --role-name portfolio-gha-plan` |
 | `Repository secret ALERT_EMAIL is not set` | Step 4 missing | Add the secret |
 | Dev plan replaces `module.ecs.aws_ecs_task_definition.this` | `TF_DEV_IMAGE_TAG` unset or wrong | Step 3 |
 | Dev plan replaces `module.alb.random_password.origin_secret` | `TF_DEV_ORIGIN_SECRET_VERSION` doesn't match the tfvars | Step 3. Never apply such a plan from CI (it can't: the role is read-only) |
@@ -95,7 +99,8 @@ branch is `main`, and the head repository is this repository. It deploys `workfl
 CI tested.
 
 Steps in `deploy (<env>)` (runner `ubuntu-24.04-arm`, `environment: <env>`, OIDC sub
-`repo:datng17/ecs-portfolio:environment:<env>`, role from the environment variable `AWS_DEPLOY_ROLE_ARN`):
+`repo:datng17@179402133/ecs-portfolio@1435398390:environment:<env>`, role from the environment variable
+`AWS_DEPLOY_ROLE_ARN`):
 
 | Step | What it does |
 |---|---|
@@ -152,7 +157,7 @@ service is denied, as intended. `ecs:ListTagsForResource` isn't granted and isn'
 |---|---|---|
 | CD run shows `dev` skipped | `CD_ENABLED` unset, CI not green, or CI ran for a PR | Expected until B-1; otherwise fix CI |
 | `Environment variable AWS_DEPLOY_ROLE_ARN is not set` | Variable set on the repository instead of the `dev` environment | Move it to the environment |
-| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The `sub` doesn't match `environment:dev` (job without `environment:`), or the OIDC provider is missing | Check the environment name; B-1 |
+| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The `sub` doesn't match `repo:datng17@179402133/ecs-portfolio@1435398390:environment:dev` (job without `environment:`, or a trust in the old name-only format, T-016) | Check the environment name and `aws iam get-role --role-name portfolio-gha-deploy-dev` |
 | `tag invalid: The image tag ... already exists` | Should not happen: the existing-tag check skips the push | Check the `Image tag` step output |
 | `Verify rollout` fails with "circuit breaker rolled back?" | New tasks failed health checks; ECS rolled back on its own | Read ECS service events and `/ecs/portfolio-dev` logs. The rollback step re-pins the previous revision and deregisters the new one |
 | Smoke test fails with 403 or a Cloudflare challenge page | Cloudflare security settings (Bot Fight Mode, WAF) challenge GitHub runner IPs | Allow the `portfolio-smoke/1.0` user agent with a WAF skip rule, or relax Bot Fight Mode |

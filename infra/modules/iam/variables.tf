@@ -52,6 +52,29 @@ variable "github_repository" {
   }
 }
 
+# Repositories created after 2026-07-15 get immutable OIDC subject claims:
+# repo:<owner>@<owner_id>/<repo>@<repo_id>:... The numeric IDs come from the GitHub API
+# (GET /repos/<owner>/<repo>: .owner.id and .id).
+variable "github_owner_id" {
+  description = "Numeric GitHub ID of the repository owner, used in the immutable OIDC sub claim (repo:<owner>@<owner_id>/<repo>@<repo_id>:...)."
+  type        = string
+  default     = null
+  validation {
+    condition     = !var.create_github_roles || can(regex("^[0-9]+$", var.github_owner_id))
+    error_message = "github_owner_id must be the owner's numeric GitHub ID (digits only) when create_github_roles is true."
+  }
+}
+
+variable "github_repository_id" {
+  description = "Numeric GitHub ID of the repository, used in the immutable OIDC sub claim (repo:<owner>@<owner_id>/<repo>@<repo_id>:...)."
+  type        = string
+  default     = null
+  validation {
+    condition     = !var.create_github_roles || can(regex("^[0-9]+$", var.github_repository_id))
+    error_message = "github_repository_id must be the repository's numeric GitHub ID (digits only) when create_github_roles is true."
+  }
+}
+
 variable "github_plan_branch" {
   description = "Branch whose workflow runs (jobs without an environment) may assume the gha-plan role."
   type        = string

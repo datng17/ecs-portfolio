@@ -25,6 +25,12 @@ locals {
 
   github_oidc_host  = "token.actions.githubusercontent.com"
   github_deploy_set = var.create_github_roles ? toset(var.github_deploy_environments) : toset([])
+
+  # Immutable subject prefix: repo:<owner>@<owner_id>/<repo>@<repo_id>. Renaming the owner or the
+  # repository keeps the IDs, and a re-created repository with the same name gets a new ID.
+  # null when the roles are not created (the IDs are only required then).
+  github_repo_parts   = split("/", var.github_repository)
+  github_subject_repo = var.create_github_roles ? "repo:${local.github_repo_parts[0]}@${var.github_owner_id}/${local.github_repo_parts[1]}@${var.github_repository_id}" : null
 }
 
 # ---------------------------------------------------------------------------
@@ -113,6 +119,7 @@ resource "aws_iam_role" "task" {
 data "aws_iam_policy_document" "gha_plan_assume" {
   count = var.create_github_roles ? 1 : 0
 
+  # checkov:skip=CKV_AWS_358:False positive. The check's repo regex expects repo:<owner>/<repo> and rejects GitHub's immutable form repo:<owner>@<id>/<repo>@<id>. The sub is an exact StringEquals on one repository and branch; aud is pinned.
   statement {
     effect  = "Allow"
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -125,11 +132,12 @@ data "aws_iam_policy_document" "gha_plan_assume" {
       variable = "${local.github_oidc_host}:aud"
       values   = ["sts.amazonaws.com"]
     }
-    # Exact match: only jobs without an environment on refs/heads/<branch> (no PRs, no forks, no tags).
+    # Exact match on the immutable sub: only jobs without an environment on refs/heads/<branch>
+    # (no PRs, no forks, no tags).
     condition {
       test     = "StringEquals"
       variable = "${local.github_oidc_host}:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/${var.github_plan_branch}"]
+      values   = ["${local.github_subject_repo}:ref:refs/heads/${var.github_plan_branch}"]
     }
   }
 }
@@ -137,6 +145,7 @@ data "aws_iam_policy_document" "gha_plan_assume" {
 data "aws_iam_policy_document" "gha_deploy_assume" {
   for_each = local.github_deploy_set
 
+  # checkov:skip=CKV_AWS_358:False positive. The check's repo regex expects repo:<owner>/<repo> and rejects GitHub's immutable form repo:<owner>@<id>/<repo>@<id>. The sub is an exact StringEquals on one repository and environment; aud is pinned.
   statement {
     effect  = "Allow"
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -154,7 +163,7 @@ data "aws_iam_policy_document" "gha_deploy_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.github_oidc_host}:sub"
-      values   = ["repo:${var.github_repository}:environment:${each.key}"]
+      values   = ["${local.github_subject_repo}:environment:${each.key}"]
     }
   }
 }
