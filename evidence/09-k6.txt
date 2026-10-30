@@ -1,0 +1,166 @@
+Task 13: Load test and SLOs (dev)
+=================================
+Date: 2026-10-30 (all times UTC; CloudWatch timestamps converted from +07:00)
+Target: https://test.name.vn  (Cloudflare colo SIN -> ALB portfolio-dev-alb -> ECS portfolio-dev-app, ap-southeast-2)
+Service state: task definition portfolio-dev-app:2, desired 2 / running 2, before and after the run
+Load generator: grafana/k6 v2.3.0 in Docker on the operator's machine (client location VN, Cloudflare colo SIN)
+Script: scripts/k6/load.js (constant-vus, 50 VUs, 2m, gracefulStop 10s, 3-5 s think time per page view)
+
+$ docker run --rm -v "${PWD}/scripts/k6:/scripts:ro" -v "${PWD}/evidence/raw:/out" grafana/k6:latest `
+    run --no-color --summary-export /out/k6-load-summary.json /scripts/load.js
+Window: 09:41:36 -> 09:43:46 (k6 exit 99 = latency thresholds crossed, see below)
+A 10-second, 2-VU dry run of the same script ran at 09:40:50 -> 09:41:00 to validate it (16 origin requests).
+
+Workload per iteration (one page view, http.batch, parallel)
+------------------------------------------------------------
+GET /                          kind=html    Cache-Control no-cache  -> cf-cache-status DYNAMIC (origin)
+GET /static/js/main.<hash>.js  kind=asset   immutable, 442 KB gzip  -> HIT at Cloudflare
+GET /static/css/main.<hash>.css kind=asset  immutable               -> HIT at Cloudflare
+GET /healthz                   kind=health  no-store                -> DYNAMIC (origin)
+Think time 3-5 s was sized for ~1,400 origin req/min (~700 per target) at ~4.4 s per iteration, below the
+ALBRequestCountPerTarget scaling target of 1,000/target/min, so this run does not trigger scaling (Task 14).
+Measured: iterations took 9.3 s on average (client bandwidth, see below), so the origin saw ~670 req/min.
+
+Cloudflare cache breakdown (k6 cf_cache_responses counter)
+----------------------------------------------------------
+html   DYNAMIC   665
+health DYNAMIC   665
+asset  HIT      1329
+asset  MISS        1     (first JS fetch after the edge entry was evicted)
+asset  EXPIRED/REVALIDATED  0
+=> 1,331 of 2,660 requests (50.0 %) went to the origin; 1,329 (50.0 %) were served from the Cloudflare edge.
+
+SLO results (targets from requirements R6)
+------------------------------------------
+SLO                 Target     Client-side (k6, end to end)          Origin-side (CloudWatch ALB)        Result
+Error rate          < 0.1 %    0.00 % (0 of 2,660 http_req_failed)   0 Target 5XX, 0 ELB 5XX of 1,332     PASS
+Availability        >= 99.9 %  100.00 % (665 of 665 page views)      2XX = 1,332 of 1,332 (100 %)         PASS
+                               checks 5,985 / 5,985 passed           UnHealthyHostCount max 0
+p95 latency         < 300 ms   9.03 s overall                        TargetResponseTime p95 1.06 ms       PASS (origin)
+                               html 9.16 s, health 9.16 s,           (max per-minute value; p99 1.49 ms)  FAIL (client, see note)
+                               asset 8.81 s
+
+Latency interpretation
+----------------------
+The latency SLO is measured at the origin: the portfolio-dev-alb-latency-p95 alarm uses ALB
+TargetResponseTime p95 > 0.3 s. On that definition the run passes with ~1 ms, about 290x headroom.
+
+The client-side p95 fails because the load generator's own downlink was the bottleneck, not the service:
+- The run received 307 MB in ~129 s = 2.4 MB/s (~19 Mbit/s) sustained. Each page view downloads ~460 KB,
+  mostly the 442 KB JS bundle, which is a Cloudflare HIT and never reaches AWS.
+- A single unloaded download of the JS bundle from the same machine right after the run: 315 KB/s, 1.40 s.
+- /healthz returns a few bytes and takes ~1 ms at the origin, yet its client p95 is 9.16 s. It is queued
+  behind the bundle downloads on the same saturated link.
+- The minimum durations match the unloaded baseline: 96 ms for an edge HIT, 288 ms for an origin
+  request (VN -> Cloudflare SIN -> ALB Sydney round trip).
+To measure client-side p95 against 300 ms, run k6 from a host with more bandwidth that is close to
+Sydney (e.g. an EC2 instance or k6 Cloud in ap-southeast-2). That is out of scope for Task 13.
+
+CloudWatch cross-check (CloudWatch MCP get_metric_data, 60 s periods, ap-southeast-2)
+--------------------------------------------------------------------------------------
+LoadBalancer app/portfolio-dev-alb/109ea3b056e9dc1e, TargetGroup targetgroup/portfolio-dev-tg/10aa8658d68e6bed
+ECS ClusterName portfolio-dev-cluster, ServiceName portfolio-dev-app
+
+minute  RequestCount  Target2XX  Target5XX  ELB5XX  ReqPerTarget  TRT p95    TRT p99    Unhealthy  CPU max  Mem max
+09:40        16           16         0         0          8        0.99 ms    1.00 ms       0       0.52 %   0.39 %
+09:41       232          232         0         0        116        1.06 ms    1.49 ms       0       0.62 %   0.39 %
+09:42       712          712         0         0        356        1.04 ms    1.38 ms       0       0.82 %   0.39 %
+09:43       388          388         0         0        194        1.03 ms    1.13 ms       0       0.82 %   0.39 %
+09:44         -            -         -         -          -           -          -          0          -        -
+(09:40 is the dry run. Target5XX and ELB5XX returned no datapoints, i.e. zero.)
+
+Reconciliation: ALB requests 09:41-09:43 = 232 + 712 + 388 = 1,332.
+k6 origin requests = 665 html + 665 health + 1 asset MISS + 1 setup GET / = 1,332. Exact match, so every
+request k6 counted as DYNAMIC/MISS reached the ALB and every HIT was served by Cloudflare.
+
+Side effects
+------------
+- Alarms: all 6 portfolio-dev-* alarms still OK, last state change 2026-10-28 (none fired).
+- Autoscaling: no scaling activities for service/portfolio-dev-cluster/portfolio-dev-app; desired 2,
+  running 2 on portfolio-dev-app:2 after the run. Peak 356 req/target/min vs the 1,000 target.
+- CPU peaked at 0.82 % of 0.25 vCPU per task, so 2 tasks carry this load with large headroom.
+
+Raw output (gitignored): evidence/raw/k6-load-task13.txt, evidence/raw/k6-load-summary.json,
+evidence/raw/k6-dryrun.json
+
+k6 end-of-test summary (verbatim, blank lines removed)
+------------------------------------------------------
+  █ THRESHOLDS 
+    cf_cache_responses{kind:asset,cf_cache:EXPIRED}
+    ✓ 'count>=0' count=0
+    cf_cache_responses{kind:asset,cf_cache:HIT}
+    ✓ 'count>=0' count=1329
+    cf_cache_responses{kind:asset,cf_cache:MISS}
+    ✓ 'count>=0' count=1
+    cf_cache_responses{kind:asset,cf_cache:REVALIDATED}
+    ✓ 'count>=0' count=0
+    cf_cache_responses{kind:health,cf_cache:DYNAMIC}
+    ✓ 'count>=0' count=665
+    cf_cache_responses{kind:html,cf_cache:DYNAMIC}
+    ✓ 'count>=0' count=665
+    checks
+    ✓ 'rate>=0.999' rate=100.00%
+    duration_by_cache{cf_cache:DYNAMIC}
+    ✓ 'p(95)>=0' p(95)=9.16s
+    duration_by_cache{cf_cache:HIT}
+    ✓ 'p(95)>=0' p(95)=8.81s
+    duration_by_cache{cf_cache:MISS}
+    ✓ 'p(95)>=0' p(95)=5.69s
+    http_req_duration{kind:asset}
+    ✗ 'p(95)<300' p(95)=8.81s
+    http_req_duration{kind:health}
+    ✗ 'p(95)<300' p(95)=9.16s
+    http_req_duration{kind:html}
+    ✗ 'p(95)<300' p(95)=9.16s
+    http_req_duration{scenario:load}
+    ✗ 'p(95)<300' p(95)=9.03s
+    http_req_failed{scenario:load}
+    ✓ 'rate<0.001' rate=0.00%
+    page_available
+    ✓ 'rate>=0.999' rate=100.00%
+  █ TOTAL RESULTS 
+    checks_total.......: 5985    46.433002/s
+    checks_succeeded...: 100.00% 5985 out of 5985
+    checks_failed......: 0.00%   0 out of 5985
+    ✓ html status 200
+    ✓ html served by Cloudflare
+    ✓ asset status 200
+    ✓ asset served by Cloudflare
+    ✓ health status 200
+    ✓ health served by Cloudflare
+    ✓ html contains root div
+    CUSTOM
+    cf_cache_responses......................: 2660    20.63689/s
+      { kind:asset,cf_cache:EXPIRED }.......: 0       0/s
+      { kind:asset,cf_cache:HIT }...........: 1329    10.310687/s
+      { kind:asset,cf_cache:MISS }..........: 1       0.007758/s
+      { kind:asset,cf_cache:REVALIDATED }...: 0       0/s
+      { kind:health,cf_cache:DYNAMIC }......: 665     5.159222/s
+      { kind:html,cf_cache:DYNAMIC }........: 665     5.159222/s
+    duration_by_cache.......................: avg=3.97s min=95.93ms  med=3.63s p(90)=7.31s  p(95)=9.03s  p(99)=11.31s max=20.57s
+      { cf_cache:DYNAMIC }..................: avg=4.21s min=287.95ms med=3.88s p(90)=7.22s  p(95)=9.16s  p(99)=11.15s max=20.57s
+      { cf_cache:HIT }......................: avg=3.73s min=95.93ms  med=3.2s  p(90)=7.37s  p(95)=8.81s  p(99)=11.58s max=20.57s
+      { cf_cache:MISS }.....................: avg=5.69s min=5.69s    med=5.69s p(90)=5.69s  p(95)=5.69s  p(99)=5.69s  max=5.69s 
+    page_available..........................: 100.00% 665 out of 665
+    HTTP
+    http_req_duration.......................: avg=3.97s min=95.93ms  med=3.63s p(90)=7.31s  p(95)=9.03s  p(99)=11.31s max=20.57s
+      { expected_response:true }............: avg=3.97s min=95.93ms  med=3.63s p(90)=7.31s  p(95)=9.03s  p(99)=11.31s max=20.57s
+      { kind:asset }........................: avg=3.73s min=95.93ms  med=3.21s p(90)=7.37s  p(95)=8.81s  p(99)=11.58s max=20.57s
+      { kind:health }.......................: avg=4.22s min=368.04ms med=3.89s p(90)=7.23s  p(95)=9.16s  p(99)=11.08s max=20.57s
+      { kind:html }.........................: avg=4.19s min=287.95ms med=3.86s p(90)=7.22s  p(95)=9.16s  p(99)=11.08s max=20.57s
+      { scenario:load }.....................: avg=3.97s min=95.93ms  med=3.63s p(90)=7.31s  p(95)=9.03s  p(99)=11.31s max=20.57s
+    http_req_failed.........................: 0.00%   0 out of 2661
+      { scenario:load }.....................: 0.00%   0 out of 2660
+    http_reqs...............................: 2661    20.644648/s
+    EXECUTION
+    iteration_duration......................: avg=9.32s min=3.58s    med=9.09s p(90)=13.15s p(95)=14.53s p(99)=17.97s max=24.77s
+    iterations..............................: 665     5.159222/s
+    vus.....................................: 7       min=0          max=50
+    vus_max.................................: 50      min=50         max=50
+    NETWORK
+    data_received...........................: 307 MB  2.4 MB/s
+    data_sent...............................: 1.4 MB  11 kB/s
+load ✓ [ 100% ] 50 VUs  2m0s
+time="2026-10-30T09:43:45Z" level=error msg="thresholds on metrics 'http_req_duration{kind:asset}, http_req_duration{kind:health}, http_req_duration{kind:html}, http_req_duration{scenario:load}' have been crossed"
+EXIT 99
+END 2026-10-30T09:43:46.8565822Z

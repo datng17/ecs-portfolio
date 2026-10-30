@@ -17,7 +17,7 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 - [x] Task 10: First dev deploy (109 added, no drift after T-013 fix, Cloudflare done by the user, live smoke 22/22 via `https://test.name.vn`, direct ALB access times out, no header → ALB 403, 2 tasks HEALTHY in 2 AZs, evidence in `evidence/07-smoke.txt`; open risk B-4)
 - [x] Task 11: CI pipeline (pushed `d71672a`, run 40803339770 green: app, container, iac, secrets pass; plan skipped until B-1 is resolved)
 - [x] Task 12: CD pipeline (pushed `d39dc07`; CI 41033307470 green incl. both plans; CD 41033557638 `deploy (dev)` green, prod skipped; `portfolio-dev-app:1` → `:2` with image `:d39dc07…`, 2/2 HEALTHY; smoke 22/22 in CI and from Docker; new project text live; CD job 4 min 07 s, push-to-live 6 min 25 s; evidence in `evidence/08-cd.txt`)
-- [ ] Task 13: Load test and SLOs
+- [x] Task 13: Load test and SLOs (k6 50 VUs / 2 min through Cloudflare, 2,660 requests: error rate 0.00 % PASS, availability 100 % PASS, origin p95 1.06 ms PASS; client p95 9.03 s FAIL, bound by the load generator's ~19 Mbit/s downlink; 50 % edge HITs; ALB count reconciles exactly; no scaling, no alarms; evidence in `evidence/09-k6.txt`)
 - [ ] Task 14: Autoscaling verification
 - [ ] Task 15: Rollback drill
 - [ ] Task 16: Security headers and Lighthouse
@@ -247,6 +247,20 @@ Spec: `.kiro/specs/ecs-portfolio/{requirements,design,tasks}.md`. 🛑 = needs e
 | Live check | `smoke.sh` in `curlimages/curl` → `https://test.name.vn` at 09:34 UTC: 22/22 PASS. The new sentence is in the served bundle `main.92090586.js` |
 | Timing | CD job start → smoke PASS **4 min 07 s** (RUNBOOK target "about 5 min of the CD job starting": met). Push → smoke PASS **6 min 25 s** end to end (CI 2 min, CD queue 11 s). Biggest share is the rolling update (2 min 39 s: tasks replaced one at a time, 15 s health checks x 2, 30 s deregistration delay). Levers if a 5-min push-to-live is required: lower the deregistration delay (nginx serves static files, 10 s is enough) or let CD build in parallel with the plan jobs; not changed |
 | Evidence | `evidence/08-cd.txt` |
+
+## Load test and SLOs (Task 13)
+
+| Item | Result |
+|---|---|
+| Script | `scripts/k6/load.js`: `constant-vus` 50 VUs for 2 min. One iteration = one page view in `http.batch`: `GET /` (no-cache), the hashed JS and CSS bundles found in `index.html` during `setup()` (immutable), `GET /healthz` (no-store), then 3–5 s think time. Requests are tagged `kind=html/asset/health`; a counter and trend record `cf-cache-status` per response. Thresholds: `http_req_duration` p95 < 300 ms (overall and per kind), `http_req_failed` < 0.1 %, `page_available` and `checks` >= 99.9 % |
+| Run | 2026-10-30 09:41:36 → 09:43:46 UTC, `grafana/k6` v2.3.0 in Docker, from the operator's machine (VN, Cloudflare colo SIN). Service on `portfolio-dev-app:2`, 2/2 tasks. A 10 s / 2 VU dry run ran at 09:40:50 |
+| Cloudflare cache | html 665 DYNAMIC, health 665 DYNAMIC, assets 1,329 HIT + 1 MISS. Half of the 2,660 requests never reached AWS |
+| Error rate (< 0.1 %) | **PASS**. k6 0 of 2,660 failed. ALB Target 5XX 0, ELB 5XX 0 |
+| Availability (99.9 %) | **PASS**. 665 / 665 page views fully successful, checks 5,985 / 5,985. ALB 2XX 1,332 of 1,332. UnHealthyHostCount max 0 |
+| p95 latency (< 300 ms) | **PASS at the origin**: ALB TargetResponseTime p95 ≤ 1.06 ms per minute (p99 ≤ 1.49 ms), the metric behind the `alb-latency-p95` alarm. **FAIL at the client**: k6 p95 9.03 s (html 9.16 s, asset 8.81 s). The client downlink was saturated (307 MB in ~129 s ≈ 2.4 MB/s; the 442 KB JS bundle dominates), so even `/healthz` (~1 ms at the origin) waited 9 s. Minimums match the unloaded baseline (96 ms edge HIT, 288 ms origin). A client-side measurement needs a load generator with more bandwidth near Sydney |
+| CloudWatch cross-check | CloudWatch MCP `get_metric_data`, 60 s periods. RequestCount 232 / 712 / 388 (09:41–09:43) = 1,332 = k6's 665 html + 665 health + 1 MISS + 1 setup request, an exact match. RequestCountPerTarget peak 356/min (scaling target 1,000). ECS CPU max 0.82 %, memory max 0.39 % |
+| Side effects | No alarms fired (all 6 `OK` since 2026-10-28). No scaling activities; still desired 2 / running 2 |
+| Evidence | `evidence/09-k6.txt`. Raw (gitignored): `evidence/raw/k6-load-task13.txt`, `k6-load-summary.json`, `k6-dryrun.json` |
 
 ## Skills note
 
