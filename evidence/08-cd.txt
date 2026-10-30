@@ -1,0 +1,116 @@
+Task 12: CD pipeline live verification (dev)
+============================================
+Date: 2026-10-30 (all times UTC; ECS/ECR timestamps converted from +07:00)
+Repository: https://github.com/datng17/ecs-portfolio (public)
+
+Push (user-approved, R9)
+------------------------
+$ git log --oneline origin/main..HEAD      # before push; remote not diverged (HEAD..origin/main empty)
+d39dc07 feat(content): describe ECS Fargate deployment in project card
+24d1f49 docs(progress): record applied OIDC trust fix and clean drift check
+03e43dc fix(iam): match GitHub immutable OIDC subject claims
+6686f0e ci(cd): add CD pipeline (OIDC, arm64 push, render, deploy, verify, smoke, rollback)
+1fbdb03 docs(progress): record first green CI run and deferred origin secret rotation
+Local checks before push: npm run lint exit 0; npm run test:ci 10/10 pass.
+$ git push origin main      ->  d71672a..d39dc07  main -> main     at 09:25:15
+Commit: d39dc07f336897ab6df81d29637184cdaf392e9b
+Visible change: src/components/Project.tsx project description gains
+  "Deployed to AWS ECS Fargate behind Cloudflare by a GitHub Actions CD pipeline with automatic rollback."
+
+Runs (GitHub REST API, /actions/runs?head_sha=d39dc07...)
+---------------------------------------------------------
+CI  41033307470  push          success  09:25:22 -> 09:27:22
+    https://github.com/datng17/ecs-portfolio/actions/runs/41033307470
+    secrets (gitleaks)       09:25:24 -> 09:25:32  success
+    app (lint, test, build)  09:25:25 -> 09:26:12  success
+    iac                      09:25:24 -> 09:26:22  success
+    container (arm64)        09:25:27 -> 09:26:37  success
+    plan (dev)               09:26:40 -> 09:27:21  success
+    plan (prod)              09:26:40 -> 09:27:09  success
+CD  41033557638  workflow_run  success  09:27:25 -> 09:31:43
+    https://github.com/datng17/ecs-portfolio/actions/runs/41033557638
+    dev / deploy (dev)       09:27:33 -> 09:31:42  success
+      https://github.com/datng17/ecs-portfolio/actions/runs/41033557638/job/123988808796
+    prod                     skipped (PROD_ENABLED unset)
+
+deploy (dev) steps
+------------------
+ 2 Preflight                               09:27:35 -> 09:27:36  success
+ 4 configure-aws-credentials (OIDC)        09:27:36 -> 09:27:38  success
+ 5 ECR login                               09:27:38 -> 09:27:40  success
+ 6 Image tag (not in ECR yet)              09:27:40 -> 09:27:46  success
+ 7 Build (native arm64)                    09:27:46 -> 09:28:28  success  42 s
+ 8 Trivy image (HIGH/CRITICAL gate)        09:28:28 -> 09:28:40  success  12 s
+ 9 Push                                    09:28:40 -> 09:28:54  success  14 s
+10 Current task definition                 09:28:54 -> 09:28:56  success  (portfolio-dev-app:1)
+11 Render task definition                  09:28:56 -> 09:28:56  success
+12 Deploy (wait for service stability)     09:28:56 -> 09:31:35  success  2 min 39 s
+13 Verify rollout                          09:31:35 -> 09:31:36  success
+14 Smoke test (https://test.name.vn)       09:31:36 -> 09:31:40  success
+15 Roll back to the previous revision      skipped (nothing failed)
+16 Job summary                             success
+
+AWS (ap-southeast-2)
+--------------------
+Revision before: arn:aws:ecs:ap-southeast-2:681990781993:task-definition/portfolio-dev-app:1
+Revision after:  arn:aws:ecs:ap-southeast-2:681990781993:task-definition/portfolio-dev-app:2
+  registered 09:28:57, image 681990781993.dkr.ecr.ap-southeast-2.amazonaws.com/portfolio-dev-app:d39dc07f336897ab6df81d29637184cdaf392e9b,
+  runtimePlatform ARM64/LINUX, 6 tags carried over from revision 1
+ECR image: portfolio-dev-app:d39dc07f336897ab6df81d29637184cdaf392e9b
+  digest sha256:810408f20f6443d5c83779a39beeeaf6961ab5c000257f37e46a2c8a7916b98d, pushed 09:28:54, 29.5 MB
+Family: portfolio-dev-app:1 and :2 both ACTIVE (:1 is the rollback target)
+describe-services: taskDefinition portfolio-dev-app:2, running 2 / desired 2,
+  1 deployment: PRIMARY portfolio-dev-app:2 COMPLETED 2
+Tasks: 01cfee8f... ap-southeast-2a RUNNING HEALTHY :2; bab8939d... ap-southeast-2b RUNNING HEALTHY :2
+Service events (rolling update, min healthy 100 %, max 200 %):
+  09:29:16 started 1 task (01cfee8f)
+  09:29:37 registered 1 target
+  09:29:46 stopped 1 old task (e6e2eb56); 09:29:56 deregistered 1 target, draining
+  09:29:47 started 1 task (bab8939d)
+  09:30:09 registered 1 target
+  09:30:18 stopped 1 old task (537c84b2); 09:30:19 deregistered 1 target, draining
+  09:31:22 deployment completed; steady state
+Target group: health check interval 15 s, healthy threshold 2, deregistration delay 30 s
+
+Live check from this machine (T-006/T-007: streamed into curlimages/curl)
+-------------------------------------------------------------------------
+$ cmd /c "docker run --rm -i curlimages/curl:latest sh -s -- https://test.name.vn < scripts\smoke.sh"   # 09:34:17
+Smoke test against https://test.name.vn
+PASS  GET /healthz -> 200 "ok"
+PASS  GET / -> 200
+PASS  GET / is text/html
+PASS  GET / contains 'Dat Nguyen'
+PASS  GET / Cache-Control: no-cache
+PASS  Server header hides nginx version
+PASS  No inline <script> blocks
+PASS  GET / has no X-Origin-Verify header
+PASS  Header content-security-policy
+PASS  Header strict-transport-security
+PASS  Header x-content-type-options
+PASS  Header x-frame-options
+PASS  Header referrer-policy
+PASS  Header permissions-policy
+PASS  index.html references /static/js/main.<hash>.js
+PASS  GET /static/js/main.92090586.js -> 200
+PASS  Static Cache-Control immutable
+PASS  Static Content-Encoding gzip
+PASS  Static keeps security headers
+PASS  SPA fallback /some/client/route -> 200 HTML
+PASS  Missing static asset -> 404
+PASS  Dotfile /.env -> 404
+RESULT: PASS                                   (22/22, exit 0)
+
+New text served (the SPA renders it from the bundle, so the bundle is checked):
+$ docker run --rm curlimages/curl:latest sh -c '... curl https://test.name.vn/static/js/main.92090586.js | grep -o "Deployed to AWS ECS Fargate behind Cloudflare[^.]*\."'
+Deployed to AWS ECS Fargate behind Cloudflare by a GitHub Actions CD pipeline with automatic rollback.
+
+Timings
+-------
+Push -> CI start              7 s
+CI duration                   2 min 00 s  (09:25:22 -> 09:27:22; plan jobs on the critical path)
+CI end -> CD job start        11 s
+CD job start -> smoke PASS    4 min 07 s  (09:27:33 -> 09:31:40)   <- RUNBOOK target "about 5 min of the CD job starting": MET
+Push -> service steady        6 min 07 s  (09:25:15 -> 09:31:22)
+Push -> smoke PASS (live)     6 min 25 s  (09:25:15 -> 09:31:40)   <- end-to-end, about 1.5 min over a 5-min push-to-live reading
+Largest share: ECS rolling update 2 min 39 s (2 tasks replaced one at a time: start, 2 health checks at 15 s,
+30 s deregistration delay each), then CI 2 min, then build + scan + push 68 s.

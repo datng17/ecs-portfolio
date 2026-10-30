@@ -149,6 +149,9 @@ service is denied, as intended. `ecs:ListTagsForResource` isn't granted and isn'
 3. Actions: CI run → CD run (`dev` → `deploy (dev)`; `prod` skipped). The deploy job summary shows the new
    revision (`portfolio-dev-app:2` for the first CD deploy).
 4. `https://test.name.vn` shows the change. Target: live within about 5 minutes of the CD job starting.
+   First run (2026-10-30, `d39dc07`): CD job 4 min 07 s, push to live 6 min 25 s (`evidence/08-cd.txt`).
+   The page is rendered by JavaScript, so check the text in the `main.<hash>.js` bundle (or a browser),
+   not in the `index.html` that `curl /` returns.
 5. `aws ecs describe-services --cluster portfolio-dev-cluster --services portfolio-dev-app --region ap-southeast-2 --query 'services[0].taskDefinition'` returns the new revision.
 
 ### CD troubleshooting
