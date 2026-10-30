@@ -10,7 +10,7 @@ function Project() {
                 <div className="project">
                     <a href="https://github.com/datng17/ecs-portfolio" target="_blank" rel="noreferrer"><img src={mock10} className="zoom" alt="thumbnail" width="100%" /></a>
                     <a href="https://github.com/datng17/ecs-portfolio" target="_blank" rel="noreferrer"><h2>DevOps Portfolio</h2></a>
-                    <p>Personal DevOps portfolio website built with React and TypeScript, highlighting CI/CD workflows, cloud automation projects, and infrastructure practices.</p>
+                    <p>Personal DevOps portfolio website built with React and TypeScript, highlighting CI/CD workflows, cloud automation projects, and infrastructure practices. Deployed to AWS ECS Fargate behind Cloudflare by a GitHub Actions CD pipeline with automatic rollback.</p>
                 </div>
             </div>
         </div>
