@@ -1,5 +1,5 @@
 import React from "react";
-import mock10 from '../assets/images/architecture.png';
+import mock10 from '../assets/images/architecture.webp';
 import '../assets/styles/Project.scss';
 
 function Project() {
@@ -8,7 +8,7 @@ function Project() {
             <h1>Personal Projects</h1>
             <div className="projects-grid">
                 <div className="project">
-                    <a href="https://github.com/datng17/ecs-portfolio" target="_blank" rel="noreferrer"><img src={mock10} className="zoom" alt="thumbnail" width="100%" /></a>
+                    <a href="https://github.com/datng17/ecs-portfolio" target="_blank" rel="noreferrer"><img src={mock10} className="zoom" alt="DevOps Portfolio architecture diagram" width="100%" loading="lazy" decoding="async" /></a>
                     <a href="https://github.com/datng17/ecs-portfolio" target="_blank" rel="noreferrer"><h2>DevOps Portfolio</h2></a>
                     <p>Personal DevOps portfolio website built with React and TypeScript, highlighting CI/CD workflows, cloud automation projects, and infrastructure practices. Deployed to AWS ECS Fargate behind Cloudflare by a GitHub Actions CD pipeline with automatic rollback.</p>
                 </div>

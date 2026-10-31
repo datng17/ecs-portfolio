@@ -20,7 +20,7 @@ function Timeline() {
             iconStyle={{ background: '#5000ca', color: 'rgb(39, 40, 34)' }}
             icon={<FontAwesomeIcon icon={faBriefcase} />}
           >
-            <h3 className="vertical-timeline-element-title">First Cloud AI Journey</h3>
+            <h2 className="vertical-timeline-element-title">First Cloud AI Journey</h2>
             <p>
               Learning DevOps skills, sharing knowledge with the community, updating hands-on labs, and supporting beginners with zero DevOps background.
             </p>

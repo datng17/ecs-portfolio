@@ -25,7 +25,7 @@ function Expertise() {
                 <div className="skills-grid">
                     <div className="skill">
                         <FontAwesomeIcon icon={faDocker} size="3x" />
-                        <h3>DevOps & Automation</h3>
+                        <h2>DevOps & Automation</h2>
                         <p>I specialize in building and automating CI/CD pipelines, managing cloud infrastructure with Terraform and AWS, and containerizing applications with Docker and Kubernetes to ensure efficient and reliable software delivery.</p>
                         <div className="flex-chips">
                             <span className="chip-title">Tech stack:</span>

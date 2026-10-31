@@ -18,6 +18,11 @@
 .skills-container .skills-grid .skill {
     align-items: center;
     text-align: left;
+
+    // h2 for a valid heading order under the section h1; keep the old h3 size.
+    h2 {
+        font-size: 1.17em;
+    }
 }
   
 .chip {

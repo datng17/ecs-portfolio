@@ -11,6 +11,13 @@
     color: rgb(39, 40, 34);
 }
 
+// The entry title is an h2 (valid heading order under the section h1),
+// sized like the h3 it replaced.
+.vertical-timeline-element h2 {
+    font-size: 1.17em;
+}
+
+.vertical-timeline-element h2,
 .vertical-timeline-element h3 {
     color: rgb(39, 40, 34);
 }
